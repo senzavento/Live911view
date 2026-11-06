@@ -148,7 +148,7 @@ export function createHeader(root: HTMLElement, ctx: Ctx, layout: Layout): Part 
     srcWarn.hidden = !bad;
     setText(srcWarn, bad ? hl.detail : '');
     setAttr(srcWarn, 'role', bad ? 'alert' : null);
-    toggleClass(wrap, 'hdr--degraded', bad);
+    toggleClass(wrap, 'hdr--error', hl.state === 'error');
     note.update(s);
     if (s && Date.now() - lastAnnounce > ANNOUNCE_EVERY_MS) {
       lastAnnounce = Date.now();

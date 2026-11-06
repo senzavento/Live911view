@@ -1,69 +1,87 @@
 import type { AddressInfo } from 'node:net';
-import type { Incident, NationalSummary } from '@live911/shared';
+import type { AreaDetail, AreaInfo, CitySummary, Incident, IntersectionDetail } from '@live911/shared';
 import { beforeAll, describe, expect, it } from 'vitest';
+import { incident } from './fixtures';
+import { STALE_AFTER_MS } from './runtime';
 import { T0, testApp, testRuntime } from './testing';
 
-const { rt, sim, setNow } = testRuntime(21);
+const HOUR = 3_600_000;
+const { rt, source, setNow } = testRuntime();
 const app = await testApp(rt);
-sim.prime(T0);
-setNow(T0 + 5000);
+const rows: Incident[] = [
+  incident({ id: '1', type: 'violent', priority: 1, status: 'on_scene' }, T0 - HOUR),
+  incident({ id: '2', type: 'traffic', areaId: 'soma', areaName: 'SoMa', intersectionId: '200', address: 'X ST \\ Y ST' }, T0 - 2 * HOUR),
+  incident({ id: '3', status: 'resolved', resolvedAt: new Date(T0).toISOString() }, T0 - 3 * HOUR),
+];
+source.push({ incidents: rows, unlocated: [{ id: 'u1', receivedMs: T0 - HOUR }, { id: 'u2', receivedMs: T0 - 2 * HOUR }] });
 
 describe('API', () => {
-  it('health', async () => {
-    const res = await app.inject('/api/health');
-    expect(res.json()).toMatchObject({ ok: true, simulated: true });
+  it('health reflects poll freshness', async () => {
+    expect((await app.inject('/api/health')).json()).toMatchObject({ ok: true, source: { name: 'fake' }, uptimeSec: 0 });
+    setNow(T0 + STALE_AFTER_MS + 1);
+    expect((await app.inject('/api/health')).json()).toMatchObject({ ok: false });
+    setNow(T0);
   });
 
-  it('summary / cities / state / city', async () => {
-    const summary = (await app.inject('/api/summary')).json<NationalSummary>();
-    expect(summary.byState).toHaveLength(51);
-    expect((await app.inject('/api/cities')).json()).toHaveLength(rt.cities.length);
-    expect((await app.inject('/api/states/tx')).json()).toMatchObject({ code: 'TX' });
-    expect((await app.inject('/api/cities/houston-tx')).json()).toMatchObject({ city: { name: 'Houston' } });
+  it('summary, areas, area, intersection', async () => {
+    const summary = (await app.inject('/api/summary')).json<CitySummary>();
+    expect(summary).toMatchObject({ active: 2, last24h: 5, unlocated24h: 2 });
+    expect(summary.timeline).toHaveLength(24);
+    const areas = (await app.inject('/api/areas')).json<AreaInfo[]>();
+    expect(areas.map((a) => a.id)).toEqual(['mission', 'soma']);
+    expect((await app.inject('/api/areas/soma')).json<AreaDetail>()).toMatchObject({ id: 'soma', active: 1 });
+    expect((await app.inject('/api/intersections/200')).json<IntersectionDetail>()).toMatchObject({ id: '200', name: 'X ST \\ Y ST' });
   });
 
-  it('404 for unknown ids', async () => {
-    for (const url of ['/api/states/ZZ', '/api/cities/nope', '/api/incidents/nope', '/api/nothing']) {
-      const res = await app.inject(url);
-      expect(res.statusCode, url).toBe(404);
-      expect(res.json()).toHaveProperty('error');
+  it('never exposes unlocated calls', async () => {
+    for (const url of ['/api/incidents?status=resolved', '/api/incidents', '/api/incidents/u1', '/api/summary']) {
+      const body = (await app.inject(url)).body;
+      expect(body, url).not.toContain('"u1"');
+      expect(body, url).not.toContain('"u2"');
     }
   });
 
+  it('404 for unknown ids, JSON errors without internals', async () => {
+    for (const url of ['/api/areas/nope', '/api/intersections/nope', '/api/incidents/nope', '/api/incidents/u1', '/api/nothing']) {
+      const res = await app.inject(url);
+      expect(res.statusCode, url).toBe(404);
+      expect(Object.keys(res.json())).toEqual(['error']);
+    }
+  });
+
+  it.each(['/api/areas/Bad%20Id', '/api/areas/UPPER', '/api/intersections/a.b', '/api/incidents/..%2F..'])('400 for malformed id %s', async (url) => {
+    expect((await app.inject(url)).statusCode).toBe(400);
+  });
+
   it.each([
-    'type=alien', 'state=Texas', 'state=T1', 'status=foo', 'limit=0', 'limit=2001', 'limit=abc', 'limit=-1',
-    'limit=1.5', 'type=fire&type=police', 'foo=bar', 'cityId=Bad%20Id',
+    'type=alien', 'status=foo', 'limit=0', 'limit=2001', 'limit=abc', 'limit=-1', 'limit=1.5', 'type=violent&type=traffic',
+    'foo=bar', 'areaId=Bad%20Id', 'areaId=UPPER', 'intersectionId=a%2Fb', 'state=CA',
   ])('400 for invalid query %s', async (qs) => {
     const res = await app.inject(`/api/incidents?${qs}`);
     expect(res.statusCode).toBe(400);
     expect(typeof res.json().error).toBe('string');
   });
 
-  it('filters incidents and honours limit', async () => {
-    const res = await app.inject('/api/incidents?type=fire&state=tx&limit=5');
-    const list = res.json<Incident[]>();
-    expect(list.length).toBeLessThanOrEqual(5);
-    for (const i of list) {
-      expect(i.type).toBe('fire');
-      expect(i.state).toBe('TX');
-      expect(i.status).not.toBe('resolved');
-    }
-    const def = (await app.inject('/api/incidents')).json<Incident[]>();
-    expect(def).toHaveLength(500);
-    const [first] = def;
-    expect((await app.inject(`/api/incidents/${first?.id}`)).json()).toEqual(first);
+  it('filters incidents', async () => {
+    const ids = async (qs: string) => (await app.inject(`/api/incidents${qs}`)).json<Incident[]>().map((i) => i.id);
+    expect(await ids('')).toEqual(['1', '2']);
+    expect(await ids('?type=violent')).toEqual(['1']);
+    expect(await ids('?areaId=soma')).toEqual(['2']);
+    expect(await ids('?intersectionId=200')).toEqual(['2']);
+    expect(await ids('?status=on_scene')).toEqual(['1']);
+    expect(await ids('?status=resolved')).toEqual(['3']);
+    expect(await ids('?limit=1')).toHaveLength(1);
   });
 
-  it('serves resolved incidents only when asked', async () => {
-    setNow(T0 + 20 * 60_000);
-    const resolved = (await app.inject('/api/incidents?status=resolved&limit=10')).json<Incident[]>();
-    expect(resolved).toHaveLength(10);
-    expect(resolved.every((i) => i.status === 'resolved' && i.resolvedAt)).toBe(true);
+  it('serves any incident of the window, resolved included', async () => {
+    expect((await app.inject('/api/incidents/3')).json()).toMatchObject({ id: '3', status: 'resolved' });
   });
 
-  it('restricts CORS and hides internals', async () => {
+  it('restricts CORS and sets safe headers', async () => {
     const ok = await app.inject({ url: '/api/health', headers: { origin: 'http://localhost:5173' } });
     expect(ok.headers['access-control-allow-origin']).toBe('http://localhost:5173');
+    expect(ok.headers['cache-control']).toBe('no-store');
+    expect(ok.headers['x-content-type-options']).toBe('nosniff');
     const bad = await app.inject({ url: '/api/health', headers: { origin: 'http://evil.example' } });
     expect(bad.headers['access-control-allow-origin']).toBeUndefined();
   });
@@ -75,7 +93,7 @@ describe('SSE /api/stream', () => {
     rt.hub.start();
   });
 
-  it('sends a snapshot, then live events', async () => {
+  it('sends a snapshot, then created/updated/resolved', async () => {
     const { port } = app.server.address() as AddressInfo;
     const ctrl = new AbortController();
     const res = await fetch(`http://127.0.0.1:${port}/api/stream`, { signal: ctrl.signal });
@@ -94,15 +112,26 @@ describe('SSE /api/stream', () => {
     };
 
     await readUntil('event: snapshot');
-    setNow(T0 + 25 * 60_000 + 3000);
+    const snapshot = JSON.parse(/event: snapshot\ndata: (.*)\n/.exec(text)?.[1] ?? 'null') as { incidents: Incident[]; summary: CitySummary };
+    expect(snapshot.incidents.map((i) => i.id).sort()).toEqual(['1', '2']);
+    expect(snapshot.summary.unlocated24h).toBe(2);
+
+    const next = [
+      { ...rows[0] as Incident, status: 'resolved' as const, resolvedAt: new Date(T0).toISOString() },
+      rows[1] as Incident,
+      rows[2] as Incident,
+      incident({ id: '4' }, T0 - 1000),
+    ];
+    source.push({ incidents: next, unlocated: [] });
     await readUntil('event: incident.created');
-    expect(text).toMatch(/event: incident\.(updated|resolved)/);
+    await readUntil('event: incident.resolved');
     expect(rt.hub.size).toBe(1);
 
     ctrl.abort();
     await new Promise((r) => setTimeout(r, 100));
     expect(rt.hub.size).toBe(0);
     await app.close();
+    expect(source.started).toBe(false);
   });
 });
 

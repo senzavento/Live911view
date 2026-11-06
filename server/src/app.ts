@@ -3,7 +3,7 @@ import fastifyStatic from '@fastify/static';
 import Fastify, { type FastifyError, type FastifyInstance, type FastifyServerOptions } from 'fastify';
 import type { AppConfig, BasemapConfig } from '@live911/shared';
 import type { Runtime } from './runtime';
-import { parseIncidentQuery } from './validation';
+import { AREA_ID, INCIDENT_ID, INTERSECTION_ID, parseIncidentQuery } from './validation';
 
 export interface AppOptions {
   corsOrigins: string[];
@@ -46,23 +46,23 @@ function registerRoutes(app: FastifyInstance, rt: Runtime, config: AppConfig): v
   app.get('/api/config', async () => config);
 
   app.get('/api/health', async () => ({
-    ok: true,
-    simulated: true,
+    ok: rt.isHealthy(),
+    source: rt.source.status(),
     uptimeSec: Math.floor((rt.clock() - rt.startedAt) / 1000),
   }));
 
-  app.get('/api/summary', async () => rt.aggregator.nationalSummary());
+  app.get('/api/summary', async () => rt.analytics.citySummary());
 
-  app.get<{ Params: { code: string } }>('/api/states/:code', async (req, reply) => {
-    const detail = rt.aggregator.stateDetail(req.params.code.toUpperCase());
-    return detail ?? reply.code(404).send({ error: 'Unknown state' });
+  app.get('/api/areas', async () => rt.analytics.areas());
+
+  app.get<{ Params: { id: string } }>('/api/areas/:id', async (req, reply) => {
+    if (!AREA_ID.test(req.params.id)) return reply.code(400).send({ error: 'id is malformed' });
+    return rt.analytics.areaDetail(req.params.id) ?? reply.code(404).send({ error: 'Unknown area' });
   });
 
-  app.get('/api/cities', async () => rt.cities);
-
-  app.get<{ Params: { id: string } }>('/api/cities/:id', async (req, reply) => {
-    const summary = rt.aggregator.citySummary(req.params.id);
-    return summary ?? reply.code(404).send({ error: 'Unknown city' });
+  app.get<{ Params: { id: string } }>('/api/intersections/:id', async (req, reply) => {
+    if (!INTERSECTION_ID.test(req.params.id)) return reply.code(400).send({ error: 'id is malformed' });
+    return rt.analytics.intersectionDetail(req.params.id) ?? reply.code(404).send({ error: 'Unknown intersection' });
   });
 
   app.get('/api/incidents', async (req, reply) => {
@@ -72,8 +72,8 @@ function registerRoutes(app: FastifyInstance, rt: Runtime, config: AppConfig): v
   });
 
   app.get<{ Params: { id: string } }>('/api/incidents/:id', async (req, reply) => {
-    const incident = rt.store.get(req.params.id);
-    return incident ?? reply.code(404).send({ error: 'Unknown incident' });
+    if (!INCIDENT_ID.test(req.params.id)) return reply.code(400).send({ error: 'id is malformed' });
+    return rt.store.get(req.params.id) ?? reply.code(404).send({ error: 'Unknown incident' });
   });
 
   app.get('/api/stream', (req, reply) => {

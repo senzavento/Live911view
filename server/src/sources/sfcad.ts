@@ -65,6 +65,7 @@ export class SfCadSource implements IncidentSource {
   private timer: NodeJS.Timeout | undefined;
   private stopCtl = new AbortController();
   private running = false;
+  private stopped = false;
   private failures = 0;
   private lastRowsUpdatedAt: number | null = null;
   private skippedPolls = 0;
@@ -88,12 +89,14 @@ export class SfCadSource implements IncidentSource {
   start(): void {
     if (this.running) return;
     this.running = true;
+    this.stopped = false;
     this.stopCtl = new AbortController();
     this.schedule(0);
   }
 
   stop(): void {
     this.running = false;
+    this.stopped = true;
     clearTimeout(this.timer);
     this.stopCtl.abort();
   }
@@ -126,7 +129,7 @@ export class SfCadSource implements IncidentSource {
         this.skippedPolls++;
       } else {
         const window = await this.fetchWindow();
-        if (!this.running) return;
+        if (this.stopped) return;
         this.lastRowsUpdatedAt = updatedAt;
         this.skippedPolls = 0;
         this.emit(window);

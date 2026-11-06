@@ -52,7 +52,8 @@ export interface KpiGrid {
 
 export function createKpiGrid(defs: Record<string, Parameters<typeof createKpi>[0]>, label: string): KpiGrid {
   const kpis: Record<string, Kpi> = {};
-  const el = h('dl', { class: 'kpis kpis--panel', attrs: { 'aria-label': label } });
+  const count = Object.keys(defs).length;
+  const el = h('dl', { class: 'kpis kpis--panel', attrs: { 'aria-label': label }, vars: { '--cols': String(count === 3 ? 3 : 2) } });
   for (const [k, d] of Object.entries(defs)) {
     const kpi = createKpi(d);
     kpis[k] = kpi;

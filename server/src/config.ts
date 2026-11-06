@@ -3,8 +3,10 @@ import type { BasemapConfig } from '@live911/shared';
 export interface Config {
   port: number;
   host: string;
-  simRate: number;
-  simSeed: number;
+  /** DataSF poll period in seconds (>= 30) */
+  pollSec: number;
+  /** optional Socrata app token; never logged or exposed */
+  socrataAppToken: string | undefined;
   corsOrigins: string[];
   logLevel: string;
   /** Built web app to serve, or undefined to run API-only. */
@@ -47,13 +49,20 @@ export function loadBasemap(env: Env): BasemapConfig | null {
   };
 }
 
+export function loadAppToken(env: Env): string | undefined {
+  const token = env.SOCRATA_APP_TOKEN?.trim();
+  if (!token) return undefined;
+  // The token goes into an HTTP header: refuse anything that could break it.
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(token)) throw new Error('SOCRATA_APP_TOKEN has an invalid format');
+  return token;
+}
+
 export function loadConfig(env: Env = process.env): Config {
   return {
     port: Math.trunc(number(env, 'PORT', 8787, 0, 65535)),
     host: env.HOST || '0.0.0.0',
-    // mean national new incidents/s; the default settles at roughly 4-5k active
-    simRate: number(env, 'SIM_RATE', 16, 0.1, 500),
-    simSeed: Math.trunc(number(env, 'SIM_SEED', Date.now() % 2 ** 31, 0, 2 ** 32 - 1)),
+    pollSec: number(env, 'SF_POLL_SEC', 120, 30, 3600),
+    socrataAppToken: loadAppToken(env),
     corsOrigins: (env.CORS_ORIGIN || 'http://localhost:5173').split(',').map((s) => s.trim()).filter(Boolean),
     logLevel: env.LOG_LEVEL || 'info',
     staticDir: env.STATIC_DIR || undefined,

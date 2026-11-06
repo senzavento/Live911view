@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import type { Incident, NationalSummary, StreamEvent } from '@live911/shared';
+import type { Incident, CitySummary, StreamEvent } from '@live911/shared';
 
 export interface StreamOptions {
   flushMs: number;
@@ -14,7 +14,7 @@ export interface StreamOptions {
 
 export const DEFAULT_STREAM_OPTIONS: StreamOptions = {
   flushMs: 250,
-  summaryMs: 2000,
+  summaryMs: 5000,
   heartbeatMs: 15_000,
   maxBufferBytes: 4 * 1024 * 1024,
   maxBlockedMs: 30_000,
@@ -22,8 +22,8 @@ export const DEFAULT_STREAM_OPTIONS: StreamOptions = {
 };
 
 export interface StreamSources {
-  snapshot(): { incidents: Incident[]; summary: NationalSummary };
-  summary(): NationalSummary;
+  snapshot(): { incidents: Incident[]; summary: CitySummary };
+  summary(): CitySummary;
 }
 
 interface Client {

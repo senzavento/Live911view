@@ -12,8 +12,12 @@ export const DEFAULT_LIMIT = 500;
 export const MAX_LIMIT = 2000;
 
 const STATUSES: readonly IncidentStatus[] = ['dispatched', 'on_scene', 'resolved'];
-const ALLOWED_KEYS = new Set(['type', 'state', 'cityId', 'status', 'limit']);
-const CITY_ID = /^[a-z0-9-]{1,64}$/;
+const ALLOWED_KEYS = new Set(['type', 'areaId', 'intersectionId', 'status', 'limit']);
+
+/** Id formats produced by the source layer; anything else cannot match a stored entity. */
+export const AREA_ID = /^[a-z0-9-]{1,64}$/;
+export const INTERSECTION_ID = /^[A-Za-z0-9_-]{1,64}$/;
+export const INCIDENT_ID = /^[A-Za-z0-9-]{1,32}$/;
 
 const fail = (error: string): { ok: false; error: string } => ({ ok: false, error });
 
@@ -43,15 +47,15 @@ export function parseIncidentQuery(query: unknown): Parsed<IncidentQuery> {
     if (!parsed) return fail(`type must be one of: ${INCIDENT_TYPES.join(', ')}`);
     filter.type = parsed;
   }
-  const state = params.get('state');
-  if (state !== undefined) {
-    if (!/^[A-Za-z]{2}$/.test(state)) return fail('state must be a 2-letter code');
-    filter.state = state.toUpperCase();
+  const areaId = params.get('areaId');
+  if (areaId !== undefined) {
+    if (!AREA_ID.test(areaId)) return fail('areaId is malformed');
+    filter.areaId = areaId;
   }
-  const cityId = params.get('cityId');
-  if (cityId !== undefined) {
-    if (!CITY_ID.test(cityId)) return fail('cityId is malformed');
-    filter.cityId = cityId;
+  const intersectionId = params.get('intersectionId');
+  if (intersectionId !== undefined) {
+    if (!INTERSECTION_ID.test(intersectionId)) return fail('intersectionId is malformed');
+    filter.intersectionId = intersectionId;
   }
   const status = params.get('status');
   if (status !== undefined) {
