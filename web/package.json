@@ -1,0 +1,14 @@
+{
+  "name": "@live911/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -p tsconfig.json && vite build",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": { "@live911/shared": "*", "maplibre-gl": "^4.7.0" },
+  "devDependencies": { "vite": "^5.4.0", "jsdom": "^25.0.0" }
+}
