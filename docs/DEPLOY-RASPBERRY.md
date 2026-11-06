@@ -49,3 +49,35 @@ Compila su un altro computer (`npm ci && npm run build`) e copia sul Pi `web/dis
 
 ## Note di sicurezza
 Il servizio gira come utente effimero (`DynamicUser`), con filesystem in sola lettura, senza privilegi aggiuntivi e con limite di memoria (400 MB).
+
+---
+
+# Variante Docker (alternativa a systemd)
+
+Richiede Docker con il plugin Compose sul Pi (OS 64 bit consigliato).
+
+```bash
+# Installa Docker (una tantum) e dai il permesso al tuo utente
+curl -fsSL https://get.docker.com | sudo sh
+sudo usermod -aG docker "$USER"   # poi disconnettiti e riconnettiti
+
+# Codice e avvio
+git clone -b claude/911-dashboard-monitoring-2uk0jr https://github.com/senzavento/Live911view.git
+cd Live911view
+docker compose up -d --build     # la prima build sul Pi richiede alcuni minuti
+```
+
+Apri `http://<ip-del-pi>:8787` (o l'IP Tailscale `100.x.y.z`).
+
+```bash
+docker compose logs -f           # log
+docker compose ps                # stato (include l'healthcheck)
+docker compose down              # stop
+git pull && docker compose up -d --build   # aggiornamento
+```
+
+Configurazione: modifica `environment` in `compose.yaml` (`SIM_RATE`, `LOG_LEVEL`). Per esporre la porta solo sull'indirizzo Tailscale cambia `ports` in `"100.x.y.z:8787:8787"`.
+
+Il container gira come utente non root, con filesystem in sola lettura, tutte le capability rimosse e limite di memoria di 400 MB. Non esporlo a Internet (nessuna autenticazione).
+
+> La build del Dockerfile non è stata provata nella sandbox (nessun demone Docker disponibile): ne ho verificato i singoli passi (dipendenze di produzione e avvio del bundle). Se `docker compose up` dà errori, incollali.

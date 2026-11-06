@@ -1,0 +1,16 @@
+services:
+  live911view:
+    build: .
+    image: live911view:latest
+    restart: unless-stopped
+    ports:
+      # Local network only. To bind to the Tailscale address only, use "100.x.y.z:8787:8787".
+      - "8787:8787"
+    environment:
+      SIM_RATE: "8"          # new incidents/s nationwide (16 = ~5k active)
+      LOG_LEVEL: info
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 400m
+    tmpfs: ["/tmp"]
