@@ -64,6 +64,8 @@ export interface MockWorld {
   stateDetail(code: string): StateDetail | null;
   citySummary(id: string): CitySummary | null;
   step(): void;
+  /** risolve un incidente emettendo incident.resolved */
+  resolve(id: string): void;
   onEvent(fn: (e: StreamEvent) => void): () => void;
   start(ms?: number): void;
   stop(): void;
@@ -191,6 +193,14 @@ export function createMockWorld(seed = 7, initial = 240): MockWorld {
         cities: cities.filter((c) => c.state === code).map((c) => citySummary(c.id) as CitySummary),
       };
     },
+    resolve(id) {
+      const inc = incidents.get(id);
+      if (!inc) return;
+      const done: Incident = { ...inc, status: 'resolved', resolvedAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+      incidents.delete(id);
+      resolved.set(id, done);
+      emit({ event: 'incident.resolved', data: done });
+    },
     step() {
       const n = 1 + Math.floor(rand() * 3);
       for (let k = 0; k < n; k++) {
@@ -201,10 +211,7 @@ export function createMockWorld(seed = 7, initial = 240): MockWorld {
       for (const inc of [...incidents.values()]) {
         const r = rand();
         if (r < 0.02) {
-          const done: Incident = { ...inc, status: 'resolved', resolvedAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
-          incidents.delete(inc.id);
-          resolved.set(done.id, done);
-          emit({ event: 'incident.resolved', data: done });
+          world.resolve(inc.id);
         } else if (r < 0.05 && inc.status === 'dispatched') {
           const up: Incident = { ...inc, status: 'on_scene', updatedAt: new Date().toISOString() };
           incidents.set(up.id, up);

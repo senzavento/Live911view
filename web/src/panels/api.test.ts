@@ -24,7 +24,7 @@ describe('createApi', () => {
     await expect(apiNet.city('x')).rejects.toBeInstanceOf(ApiError);
   });
   it('codifica i parametri', async () => {
-    const f = vi.fn(async () => ok([]));
+    const f = vi.fn(async (_i: string) => ok([]));
     await createApi(f).cityIncidents('a b');
     expect(f.mock.calls[0]?.[0]).toBe('/api/incidents?cityId=a%20b&limit=500');
   });

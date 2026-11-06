@@ -94,18 +94,12 @@ describe('mountPanels', () => {
     store.select({ state: inc.state, cityId: inc.cityId, incidentId: inc.id });
     await until(() => ctx.roots.detail.querySelector('.card') !== null && !ctx.roots.detail.querySelector<HTMLElement>('.card')?.hidden);
     expect(ctx.roots.detail.querySelector<HTMLElement>('.banner')?.hidden).toBe(true);
-    // risolvi nel mondo finto
-    world.incidents.delete(inc.id);
-    const done = { ...inc, status: 'resolved' as const, resolvedAt: new Date().toISOString() };
-    world.resolved.set(inc.id, done);
-    world.step; // il mondo emetterà summary; l'evento resolved lo inviamo a mano
-    (store as unknown as { applyIncident: (op: string, i: unknown) => void }).applyIncident('resolved', done);
+    world.resolve(inc.id);
     await until(() => ctx.roots.detail.querySelector<HTMLElement>('.banner')?.hidden === false);
     expect(ctx.roots.detail.textContent).toContain('risolto');
   });
 
   it('errore API: mostra messaggio e Riprova', async () => {
-    world.failNext = 1;
     const failing = { ...mockApi(world), state: async () => { throw new Error('Server non raggiungibile'); } };
     unmount();
     ctx = setup();
