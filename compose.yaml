@@ -1,7 +1,9 @@
 services:
   live911view:
+    # Prebuilt by GitHub Actions: `docker compose pull && docker compose up -d`.
+    # Local build instead: `docker compose up -d --build`.
+    image: ghcr.io/senzavento/live911view:${LIVE911_TAG:-latest}
     build: .
-    image: live911view:latest
     restart: unless-stopped
     ports:
       # Local network only. To bind to the Tailscale address only, use "100.x.y.z:8787:8787".
