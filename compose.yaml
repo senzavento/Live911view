@@ -9,7 +9,8 @@ services:
       # Local network only. To bind to the Tailscale address only, use "100.x.y.z:8787:8787".
       - "8787:8787"
     environment:
-      SIM_RATE: "8"          # new incidents/s nationwide (16 = ~5k active)
+      SF_POLL_SEC: "120"        # how often DataSF is polled (source updates every ~10 min)
+      ACTIVE_WINDOW_MIN: "120"  # a call is "in corso" while updated within this window
       LOG_LEVEL: info
     read_only: true
     cap_drop: [ALL]

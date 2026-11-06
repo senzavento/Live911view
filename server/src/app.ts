@@ -15,7 +15,7 @@ export interface AppOptions {
 }
 
 export async function buildApp(rt: Runtime, opts: AppOptions): Promise<FastifyInstance> {
-  const app = Fastify({ logger: opts.logger, forceCloseConnections: true, maxParamLength: 100 });
+  const app = Fastify({ logger: opts.logger, forceCloseConnections: true, routerOptions: { maxParamLength: 100 } });
 
   await app.register(cors, { origin: opts.corsOrigins, methods: ['GET', 'HEAD', 'OPTIONS'] });
 

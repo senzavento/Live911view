@@ -1,6 +1,6 @@
 # Installazione su Raspberry Pi
 
-Modalità: **un solo processo** Node (Fastify) che serve API, stream SSE e il frontend compilato sulla porta `8787`, gestito da systemd. Pensata per **uso in rete locale**.
+Il Pi deve poter raggiungere `data.sf.gov` (uscita HTTPS). Modalità: **un solo processo** Node (Fastify) che serve API, stream SSE e il frontend compilato sulla porta `8787`, gestito da systemd. Pensata per **uso in rete locale**.
 
 > L'app non ha autenticazione né rate limit: **non esporla a Internet** (niente port forwarding). Per l'accesso remoto usa una VPN (es. Tailscale/WireGuard) oppure metti davanti un reverse proxy con HTTPS e autenticazione.
 
@@ -32,7 +32,9 @@ Variabili in `/etc/live911view.env` (una `CHIAVE=valore` per riga), poi `sudo sy
 | Var | Default Pi | Significato |
 |---|---|---|
 | `PORT` | 8787 | porta |
-| `SIM_RATE` | 8 | nuovi incidenti/s a livello nazionale (~2-3k attivi); 16 = ~5k attivi |
+| `SF_POLL_SEC` | 120 | ogni quanti secondi interrogare DataSF (30-3600; la fonte si aggiorna ogni ~10 min) |
+| `ACTIVE_WINDOW_MIN` | 120 | minuti senza aggiornamenti dopo i quali una chiamata non è più "in corso" (10-1440); le attività di routine (multe, fermi) valgono 30 min |
+| `SOCRATA_APP_TOKEN` | – | opzionale, token gratuito DataSF per limiti più larghi |
 | `LOG_LEVEL` | info | livello log |
 
 ## Gestione
@@ -76,7 +78,7 @@ docker compose down              # stop
 git pull && docker compose up -d --build   # aggiornamento
 ```
 
-Configurazione: modifica `environment` in `compose.yaml` (`SIM_RATE`, `LOG_LEVEL`). Per esporre la porta solo sull'indirizzo Tailscale cambia `ports` in `"100.x.y.z:8787:8787"`.
+Configurazione: modifica `environment` in `compose.yaml` (`SF_POLL_SEC`, `ACTIVE_WINDOW_MIN`, `LOG_LEVEL`). Per esporre la porta solo sull'indirizzo Tailscale cambia `ports` in `"100.x.y.z:8787:8787"`.
 
 Il container gira come utente non root, con filesystem in sola lettura, tutte le capability rimosse e limite di memoria di 400 MB. Non esporlo a Internet (nessuna autenticazione).
 
@@ -102,7 +104,7 @@ umask 077
 cat > ~/live911.env <<'ENV'
 BASEMAP_TILES=https://api.maptiler.com/maps/dataviz-dark/{z}/{x}/{y}.png?key=LA_TUA_CHIAVE
 BASEMAP_ATTRIBUTION=© MapTiler © OpenStreetMap contributors
-SIM_RATE=8
+ACTIVE_WINDOW_MIN=120
 ENV
 docker pull ghcr.io/senzavento/live911view:claude-911-dashboard-monitoring-2uk0jr
 docker rm -f live911view

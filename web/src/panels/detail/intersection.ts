@@ -1,4 +1,4 @@
-import { PRIORITY_LABEL, TYPE_META, type Incident, type IntersectionDetail } from '@live911/shared';
+import { isLive, PRIORITY_LABEL, TYPE_META, type Incident, type IntersectionDetail } from '@live911/shared';
 import { Resource } from '../api';
 import { createTypeBars } from '../charts/bars';
 import type { Ctx } from '../ctx';
@@ -50,7 +50,7 @@ export function createIntersectionView(ctx: Ctx, intersectionId: string, areaId?
       return {
         el: li,
         update(i) {
-          const resolved = i.status === 'resolved';
+          const resolved = !isLive(i.status);
           setText(prio, priorityShort(i.priority));
           setAttr(prio, 'class', `chip chip--p${i.priority}`);
           setAttr(prio, 'title', `Priorità ${PRIORITY_LABEL[i.priority].toLowerCase()}`);

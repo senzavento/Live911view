@@ -18,7 +18,7 @@ async function main(): Promise<void> {
     appToken: config.socrataAppToken,
     log: { info: (o, m) => log.info(o, m), warn: (o, m) => log.warn(o, m) },
   });
-  const runtime = createRuntime({ source, onError: (err) => log.warn({ err }, 'runtime error') });
+  const runtime = createRuntime({ source, activeWindowMin: config.activeWindowMin, onError: (err) => log.warn({ err }, 'runtime error') });
   const app = await buildApp(runtime, { corsOrigins: config.corsOrigins, logger: { level: config.logLevel }, staticDir, basemap: config.basemap });
   log = { info: (o, m) => app.log.info(o, m), warn: (o, m) => app.log.warn(o, m) };
 

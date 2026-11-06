@@ -24,11 +24,11 @@ export function createHeader(root: HTMLElement, ctx: Ctx, layout: Layout): Part 
   root.setAttribute('aria-label', 'Indicatori di San Francisco');
 
   const kpis = {
-    active: createKpi({ label: 'Attive', format: fmtInt, hint: 'chiamate non risolte' }),
+    active: createKpi({ label: 'In corso', format: fmtInt, hint: 'non chiuse, aggiornate di recente' }),
     last24h: createKpi({ label: 'Ultime 24 h', format: fmtInt, hint: 'chiamate ricevute' }),
     rate: createKpi({ label: 'Chiamate / ora', format: fmtInt, hint: 'ultima ora' }),
     critical: createKpi({ label: 'Critiche', format: fmtInt, hint: 'priorità 1', tone: 'danger' }),
-    resp: createKpi({ label: 'Ricezione → invio', format: fmtDuration, hint: 'tempo medio', animate: false }),
+    resp: createKpi({ label: 'Invio chiamate critiche', format: fmtDuration, hint: 'mediana ricezione → invio, priorità A', animate: false }),
   };
 
   const crumbList = h('ol', { class: 'crumbs__list' });
@@ -133,7 +133,7 @@ export function createHeader(root: HTMLElement, ctx: Ctx, layout: Layout): Part 
     kpis.last24h.set(s.last24h);
     kpis.rate.set(s.ratePerHour);
     kpis.critical.set(s.critical);
-    kpis.resp.set(s.avgDispatchSec);
+    kpis.resp.set(s.medianCriticalDispatchSec);
   }
 
   function renderSource(): void {

@@ -183,7 +183,7 @@ describe('mountPanels', () => {
       expect(warn?.getAttribute('role')).toBe('alert');
       expect(warn?.textContent).toContain('non è riuscito');
       expect(q(ctx.roots.header, '.src__state--error')).not.toBeNull();
-      // avgDispatchSec null → n/d
+      // medianCriticalDispatchSec null → n/d
       const vals = [...ctx.roots.header.querySelectorAll('.kpi__value')].map((e) => e.textContent);
       expect(vals).toContain('n/d');
       // il badge di trasparenza resta

@@ -9,7 +9,8 @@ const HOUR = 3_600_000;
 const sum = (c: Record<string, number>): number => Object.values(c).reduce((a, b) => a + b, 0);
 
 function build(incidents: Incident[], unlocatedAges: number[] = [], now = T0) {
-  const store = new IncidentStore(() => now);
+  // wide active window: these tests are about aggregation, expiry has its own tests
+  const store = new IncidentStore(() => now, 48 * HOUR);
   store.sync({
     kind: 'window',
     windowStartMs: now - 48 * HOUR,
@@ -68,17 +69,30 @@ describe('city summary', () => {
   });
 });
 
-describe('avgDispatchSec', () => {
-  it('is null below 10 samples and ignores officer-initiated calls', () => {
-    const few = build(many(9, () => ({})));
-    expect(few.citySummary().avgDispatchSec).toBeNull();
-    const ok = build([...many(10, () => ({})), ...many(5, (i) => ({ id: `o${i}`, officerInitiated: true }))]);
-    expect(ok.citySummary().avgDispatchSec).toBe(60);
+describe('medianCriticalDispatchSec', () => {
+  const critical = (over: Partial<Incident> = {}): Partial<Incident> => ({ priority: 1, ...over });
+  /** dispatch time `delayMs` after the i-th call of `many` (default age 1 h) */
+  const dispatchAfter = (i: number, delayMs: number): string => new Date(T0 - HOUR - i * 1000 + delayMs).toISOString();
+
+  it('is null below 10 critical samples; non-critical and officer-initiated calls are ignored', () => {
+    const few = build(many(9, () => critical()));
+    expect(few.citySummary().medianCriticalDispatchSec).toBeNull();
+    const rows = [
+      ...many(10, () => critical()),
+      ...many(5, (i) => critical({ id: `o${i}`, officerInitiated: true })),
+      ...many(5, (i) => ({ id: `n${i}`, priority: 3 as const, dispatchedAt: dispatchAfter(i, 900_000) })),
+    ];
+    expect(build(rows).citySummary().medianCriticalDispatchSec).toBe(60);
+  });
+
+  it('uses the median, so one slow call does not drag it', () => {
+    const rows = many(11, (i) => critical(i === 0 ? { dispatchedAt: dispatchAfter(0, 7_200_000) } : {}));
+    expect(build(rows).citySummary().medianCriticalDispatchSec).toBe(60);
   });
 
   it('ignores calls without dispatch time', () => {
-    const rows = many(14, (i) => (i < 3 ? { dispatchedAt: undefined } : {}));
-    expect(build(rows).citySummary().avgDispatchSec).toBe(60);
+    const rows = many(14, (i) => critical(i < 3 ? { dispatchedAt: undefined } : {}));
+    expect(build(rows).citySummary().medianCriticalDispatchSec).toBe(60);
   });
 });
 
@@ -118,7 +132,8 @@ describe('areas and intersections', () => {
 describe('caching', () => {
   it('recomputes when time moves on', () => {
     let now = T0;
-    const store = new IncidentStore(() => now);
+    // wide active window: these tests are about aggregation, expiry has its own tests
+  const store = new IncidentStore(() => now, 48 * HOUR);
     store.sync({ kind: 'window', windowStartMs: now - 48 * HOUR, incidents: many(1, () => ({})), unlocated: [] });
     const analytics = new Analytics(store, () => now, () => new FakeSource().status());
     expect(analytics.citySummary().last24h).toBe(1);

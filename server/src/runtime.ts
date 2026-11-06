@@ -5,12 +5,15 @@ import { DEFAULT_STREAM_OPTIONS, StreamHub, type StreamOptions } from './stream'
 
 /** /api/health reports ok=false when no poll has succeeded for this long. */
 export const STALE_AFTER_MS = 15 * 60_000;
+const EXPIRY_TICK_MS = 30_000;
 
 export interface RuntimeOptions {
   source: IncidentSource;
   clock?: () => number;
   stream?: Partial<StreamOptions>;
   onError?: (err: unknown) => void;
+  /** minutes a call stays "in corso" without updates (default 120) */
+  activeWindowMin?: number;
 }
 
 export interface Runtime {
@@ -30,7 +33,7 @@ export interface Runtime {
 export function createRuntime(opts: RuntimeOptions): Runtime {
   const { source } = opts;
   const clock = opts.clock ?? Date.now;
-  const store = new IncidentStore(clock);
+  const store = new IncidentStore(clock, (opts.activeWindowMin ?? 120) * 60_000);
   const analytics = new Analytics(store, clock, () => source.status());
   const hub = new StreamHub(
     {
@@ -49,6 +52,16 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   };
   source.subscribe(handle);
 
+  // The source is polled every ~2 min, but calls age out continuously.
+  let expiryTimer: ReturnType<typeof setInterval> | undefined;
+  const expireStale = (): void => {
+    try {
+      for (const change of store.expire()) hub.publish(change);
+    } catch (err) {
+      opts.onError?.(err);
+    }
+  };
+
   return {
     source,
     store,
@@ -63,10 +76,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     start: () => {
       source.start();
       hub.start();
+      expiryTimer = setInterval(expireStale, EXPIRY_TICK_MS);
+      expiryTimer.unref();
     },
     stop: () => {
       source.stop();
       hub.stop();
+      if (expiryTimer) clearInterval(expiryTimer);
     },
   };
 }

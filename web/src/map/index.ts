@@ -35,7 +35,7 @@ const MAX_BOUNDS: [[number, number], [number, number]] = [
   [SF_BOUNDS[1][0] + 0.1, SF_BOUNDS[1][1] + 0.08],
 ];
 
-const STATUS_LABEL: Record<IncidentStatus, string> = { dispatched: 'Inviata', on_scene: 'Sul posto', resolved: 'Chiusa' };
+const STATUS_LABEL: Record<IncidentStatus, string> = { dispatched: 'Inviata', on_scene: 'Sul posto', resolved: 'Chiusa', expired: 'Scaduta' };
 
 const defaultLoadAreas = async (): Promise<AreaInfo[]> => {
   const res = await fetch('/api/areas');

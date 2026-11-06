@@ -11,7 +11,7 @@ export interface IncidentQuery {
 export const DEFAULT_LIMIT = 500;
 export const MAX_LIMIT = 2000;
 
-const STATUSES: readonly IncidentStatus[] = ['dispatched', 'on_scene', 'resolved'];
+const STATUSES: readonly IncidentStatus[] = ['dispatched', 'on_scene', 'resolved', 'expired'];
 const ALLOWED_KEYS = new Set(['type', 'areaId', 'intersectionId', 'status', 'limit']);
 
 /** Id formats produced by the source layer; anything else cannot match a stored entity. */

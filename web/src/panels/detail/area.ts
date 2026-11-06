@@ -33,7 +33,7 @@ export function createAreaView(ctx: Ctx, areaId: string): View {
       active: { label: 'Attive', format: fmtInt },
       critical: { label: 'Critiche', format: fmtInt, tone: 'danger' },
       last24h: { label: 'Ultime 24 h', format: fmtInt },
-      resp: { label: 'Ricezione → invio', format: fmtDuration, animate: false },
+      resp: { label: 'Invio critiche (mediana)', format: fmtDuration, animate: false },
     },
     'Indicatori del quartiere',
   );
@@ -73,7 +73,7 @@ export function createAreaView(ctx: Ctx, areaId: string): View {
     grid.kpis['active']?.set(live.active);
     grid.kpis['critical']?.set(live.critical);
     grid.kpis['last24h']?.set(live.last24h);
-    grid.kpis['resp']?.set(data.avgDispatchSec);
+    grid.kpis['resp']?.set(data.medianCriticalDispatchSec);
     bars.update(live.byType, null, hide ? ['proactive'] : []);
     chart.update(data.timeline, visibleTypes(hide));
     const items = rankIntersections(data.intersections, hide);

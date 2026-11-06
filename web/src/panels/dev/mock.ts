@@ -284,7 +284,7 @@ export function createMockWorld(seed = 7, initial = 240): MockWorld {
         critical: all.critical,
         byType: all.byType,
         ratePerHour: 140 + Math.floor(rand() * 20),
-        avgDispatchSec: world.sourceMode === 'error' ? null : 214 + Math.floor(rand() * 20),
+        medianCriticalDispatchSec: world.sourceMode === 'error' ? null : 214 + Math.floor(rand() * 20),
         unlocated24h: unlocated,
         timeline: tl,
         byArea: AREAS.map(areaSummary),
@@ -296,7 +296,7 @@ export function createMockWorld(seed = 7, initial = 240): MockWorld {
       if (!a) return null;
       return {
         ...areaSummary(a),
-        avgDispatchSec: 190 + a.w * 7,
+        medianCriticalDispatchSec: 190 + a.w * 7,
         timeline: areaTl.get(id) ?? [],
         intersections: ixs.filter((x) => x.areaId === id).map(ixSummary),
       };

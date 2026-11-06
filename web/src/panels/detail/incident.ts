@@ -1,4 +1,4 @@
-import { PRIORITY_LABEL, TYPE_META, type Incident } from '@live911/shared';
+import { isLive, PRIORITY_LABEL, TYPE_META, type Incident } from '@live911/shared';
 import { ApiError } from '../api';
 import type { Ctx } from '../ctx';
 import { h, setAttr, setText, toggleClass } from '../dom';
@@ -32,7 +32,7 @@ export function stepInfo(inc: Incident): StepInfo[] {
   STEPS.forEach((s, i) => {
     if (times[s.key]) lastDone = i;
   });
-  const resolved = inc.status === 'resolved';
+  const resolved = !isLive(inc.status);
   return STEPS.map((s, i) => ({
     key: s.key,
     label: s.label,
@@ -111,9 +111,16 @@ export function createIncidentView(ctx: Ctx, id: string): View {
     setText(chipP, `Priorità ${PRIORITY_LABEL[inc.priority].toLowerCase()}`);
     setAttr(chipP, 'class', `chip chip--p${inc.priority}`);
     setText(chipS, STATUS_LABEL[inc.status]);
-    const resolved = inc.status === 'resolved';
+    const resolved = !isLive(inc.status);
     banner.hidden = !resolved;
-    setText(banner, resolved ? `Chiamata risolta alle ${fmtTimeTz(inc.resolvedAt ?? inc.updatedAt)}. Non è più attiva sulla mappa.` : '');
+    setText(
+      banner,
+      !resolved
+        ? ''
+        : inc.status === 'expired'
+          ? `Nessun aggiornamento dalle ${fmtTimeTz(inc.updatedAt)}: la fonte non ha registrato la chiusura. Non è più considerata in corso.`
+          : `Chiamata risolta alle ${fmtTimeTz(inc.resolvedAt ?? inc.updatedAt)}. Non è più attiva sulla mappa.`,
+    );
     toggleClass(card, 'is-resolved', resolved);
     stepInfo(inc).forEach((s, i) => {
       const el = stepEls[i];
@@ -148,7 +155,7 @@ export function createIncidentView(ctx: Ctx, id: string): View {
     render();
   });
   const timer = setInterval(() => {
-    if (current && current.status !== 'resolved') tick();
+    if (current && isLive(current.status)) tick();
   }, 1000);
 
   // Risolta o fuori dallo store: GET /api/incidents/:id

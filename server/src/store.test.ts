@@ -81,7 +81,7 @@ describe('IncidentStore.sync', () => {
   });
 
   it('filters and orders queries', () => {
-    const store = new IncidentStore(() => T0);
+    const store = new IncidentStore(() => T0, 48 * HOUR);
     store.sync(win([
       incident({ id: 'old', type: 'violent' }, T0 - 3 * HOUR),
       incident({ id: 'new', type: 'violent', intersectionId: '7' }, T0 - HOUR),
@@ -92,5 +92,64 @@ describe('IncidentStore.sync', () => {
     expect(store.query({ intersectionId: '7' }, 10).map((i) => i.id)).toEqual(['new']);
     expect(store.query({ type: 'alarm' }, 10)).toEqual([]);
     expect(store.query({}, 1)).toHaveLength(1);
+  });
+});
+
+describe('expiry of calls the source never closes', () => {
+  const MIN = 60_000;
+  const fresh = (id: string, ageMin: number, over: Parameters<typeof incident>[0] extends infer P ? Partial<P> : never = {}) =>
+    incident({ id, ...over }, T0 - ageMin * MIN);
+
+  it('marks a live call expired once it has no update for longer than the window', () => {
+    const store = new IncidentStore(() => T0, 120 * MIN);
+    store.sync(win([fresh('recent', 30), fresh('stale', 300)]));
+    expect(store.get('recent')?.status).toBe('dispatched');
+    expect(store.get('stale')?.status).toBe('expired');
+    expect(store.activeIncidents().map((i) => i.id)).toEqual(['recent']);
+    expect(store.query({}, 10).map((i) => i.id)).toEqual(['recent']);
+    expect(store.query({ status: 'expired' }, 10).map((i) => i.id)).toEqual(['stale']);
+  });
+
+  it('keeps a long call alive while the source keeps updating it', () => {
+    const store = new IncidentStore(() => T0, 120 * MIN);
+    const long = fresh('long', 600, { updatedAt: new Date(T0 - 10 * MIN).toISOString() });
+    store.sync(win([long]));
+    expect(store.get('long')?.status).toBe('dispatched');
+  });
+
+  it('gives routine officer activity only 30 minutes', () => {
+    const store = new IncidentStore(() => T0, 120 * MIN);
+    store.sync(win([fresh('cite', 45, { type: 'proactive' }), fresh('fight', 45)]));
+    expect(store.get('cite')?.status).toBe('expired');
+    expect(store.get('fight')?.status).toBe('dispatched');
+  });
+
+  it('never revives or expires closed calls', () => {
+    const store = new IncidentStore(() => T0, 120 * MIN);
+    store.sync(win([fresh('done', 500, { status: 'resolved', resolvedAt: new Date(T0 - 400 * MIN).toISOString() })]));
+    expect(store.get('done')?.status).toBe('resolved');
+    expect(store.expire()).toEqual([]);
+  });
+
+  it('expire() ages live calls between polls and emits one resolved event each', () => {
+    let now = T0;
+    const store = new IncidentStore(() => now, 120 * MIN);
+    store.sync(win([fresh('a', 60)]));
+    expect(store.expire()).toEqual([]);
+    now = T0 + 90 * MIN; // 150 min since the last update
+    const changes = store.expire();
+    expect(changes.map((c) => [c.event, c.data.id, c.data.status])).toEqual([['incident.resolved', 'a', 'expired']]);
+    expect(store.expire()).toEqual([]);
+    expect(store.activeIncidents()).toEqual([]);
+  });
+
+  it('a call that expired and is then updated by the source comes back as created', () => {
+    let now = T0;
+    const store = new IncidentStore(() => now, 120 * MIN);
+    store.sync(win([fresh('a', 60)]));
+    now = T0 + 90 * MIN;
+    store.expire();
+    const revived = fresh('a', 60, { updatedAt: new Date(now - MIN).toISOString() });
+    expect(store.sync(win([revived])).map((c) => [c.event, c.data.id])).toEqual([['incident.created', 'a']]);
   });
 });

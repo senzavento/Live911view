@@ -114,6 +114,7 @@ export const STATUS_LABEL = {
   dispatched: 'Inviata',
   on_scene: 'Sul posto',
   resolved: 'Risolta',
+  expired: 'Scaduta',
 } as const;
 
 export function priorityShort(p: Priority): string {

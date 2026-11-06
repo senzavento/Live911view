@@ -1,4 +1,4 @@
-import { INCIDENT_TYPES, TYPE_META, type Counts, type Incident, type IncidentType, type TypeCounts } from '@live911/shared';
+import { isLive, INCIDENT_TYPES, TYPE_META, type Counts, type Incident, type IncidentType, type TypeCounts } from '@live911/shared';
 import type { Selection } from '../store';
 
 export function zeroCounts(): TypeCounts {
@@ -19,7 +19,7 @@ export function activeCount(c: Pick<Counts, 'active' | 'byType'>, hideProactive:
 export function scopeCounts(incidents: Iterable<Incident>, sel: Selection): TypeCounts {
   const out = zeroCounts();
   for (const inc of incidents) {
-    if (inc.status === 'resolved') continue;
+    if (!isLive(inc.status)) continue;
     if (sel.areaId && inc.areaId !== sel.areaId) continue;
     if (sel.intersectionId && inc.intersectionId !== sel.intersectionId) continue;
     out[inc.type]++;
@@ -32,8 +32,8 @@ const ts = (s: string | undefined): number => (s ? Date.parse(s) : 0);
 /** Attive prima (priorità 1 → 3, poi più recenti); poi risolte, dalle più recenti. */
 export function sortIncidents(list: readonly Incident[]): Incident[] {
   return list.slice().sort((a, b) => {
-    const ra = a.status === 'resolved' ? 1 : 0;
-    const rb = b.status === 'resolved' ? 1 : 0;
+    const ra = isLive(a.status) ? 0 : 1;
+    const rb = isLive(b.status) ? 0 : 1;
     if (ra !== rb) return ra - rb;
     if (!ra && a.priority !== b.priority) return a.priority - b.priority;
     const ta = ra ? ts(a.resolvedAt) || ts(a.createdAt) : ts(a.createdAt);
@@ -58,7 +58,7 @@ export function mergeIncidents(
   for (const inc of fromApi) {
     const l = live.get(inc.id);
     if (l) out.set(inc.id, l);
-    else if (storeReady && inc.status !== 'resolved') out.set(inc.id, { ...inc, status: 'resolved', resolvedAt: inc.resolvedAt ?? inc.updatedAt });
+    else if (storeReady && isLive(inc.status)) out.set(inc.id, { ...inc, status: 'resolved', resolvedAt: inc.resolvedAt ?? inc.updatedAt });
     else out.set(inc.id, inc);
   }
   if (storeReady) {

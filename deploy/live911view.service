@@ -1,5 +1,5 @@
 [Unit]
-Description=Live 911 View (simulated US 911 dashboard)
+Description=Live 911 View (San Francisco dispatched calls, DataSF)
 After=network-online.target
 Wants=network-online.target
 
@@ -11,8 +11,7 @@ ExecStart=@NODE@ @APP_DIR@/server/dist/index.mjs
 Environment=NODE_ENV=production
 Environment=PORT=8787
 Environment=STATIC_DIR=@APP_DIR@/web/dist
-# Lower than the default (16) to keep a Raspberry Pi comfortable; override in /etc/live911view.env
-Environment=SIM_RATE=8
+# Optional overrides (SF_POLL_SEC, ACTIVE_WINDOW_MIN, SOCRATA_APP_TOKEN, BASEMAP_*) go in /etc/live911view.env
 EnvironmentFile=-/etc/live911view.env
 Restart=on-failure
 RestartSec=3

@@ -11,6 +11,8 @@ export interface Config {
   logLevel: string;
   /** Built web app to serve, or undefined to run API-only. */
   staticDir: string | undefined;
+  /** a call is "in corso" only while updated within this window (minutes) */
+  activeWindowMin: number;
   basemap: BasemapConfig | null;
 }
 
@@ -66,6 +68,7 @@ export function loadConfig(env: Env = process.env): Config {
     corsOrigins: (env.CORS_ORIGIN || 'http://localhost:5173').split(',').map((s) => s.trim()).filter(Boolean),
     logLevel: env.LOG_LEVEL || 'info',
     staticDir: env.STATIC_DIR || undefined,
+    activeWindowMin: Math.trunc(number(env, 'ACTIVE_WINDOW_MIN', 120, 10, 1440)),
     basemap: loadBasemap(env),
   };
 }

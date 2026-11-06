@@ -1,7 +1,10 @@
-import type { Incident, IncidentStatus, IncidentType } from '@live911/shared';
+import { isLive, type Incident, type IncidentStatus, type IncidentType } from '@live911/shared';
 import type { SourceWindow, UnlocatedCall } from './source';
 
 export const WINDOW_MS = 48 * 3_600_000;
+/** Routine officer activity (stops, citations) is momentary: it counts as in progress only briefly. */
+export const PROACTIVE_WINDOW_MS = 30 * 60_000;
+
 
 export interface IncidentFilter {
   type?: IncidentType;
@@ -29,7 +32,7 @@ const matches = (i: Incident, f: IncidentFilter): boolean =>
   (!f.type || i.type === f.type) &&
   (!f.areaId || i.areaId === f.areaId) &&
   (!f.intersectionId || i.intersectionId === f.intersectionId) &&
-  (f.status ? i.status === f.status : i.status !== 'resolved');
+  (f.status ? i.status === f.status : isLive(i.status));
 
 /**
  * The whole 48 h window (active and resolved located calls) plus the identities of unlocated ones.
@@ -43,7 +46,33 @@ export class IncidentStore {
   /** bumped on every mutation: lets readers cache derived data */
   version = 0;
 
-  constructor(private readonly clock: () => number = Date.now) {}
+  constructor(
+    private readonly clock: () => number = Date.now,
+    private readonly activeWindowMs: number = 120 * 60_000,
+  ) {}
+
+  private liveLimitMs(i: Incident): number {
+    return i.type === 'proactive' ? Math.min(this.activeWindowMs, PROACTIVE_WINDOW_MS) : this.activeWindowMs;
+  }
+
+  /** The source often never records a close: a call with no update for too long is no longer "in progress". */
+  private withExpiry(i: Incident): Incident {
+    if (!isLive(i.status) || this.clock() - Date.parse(i.updatedAt) <= this.liveLimitMs(i)) return i;
+    return { ...i, status: 'expired' };
+  }
+
+  /** Expires stale live calls between polls; returns the `resolved` events to publish. */
+  expire(): IncidentChange[] {
+    const changes: IncidentChange[] = [];
+    for (const [id, i] of this.incidents) {
+      const next = this.withExpiry(i);
+      if (next === i) continue;
+      this.incidents.set(id, next);
+      changes.push({ event: 'incident.resolved', data: next });
+    }
+    if (changes.length) this.version++;
+    return changes;
+  }
 
   get isLoaded(): boolean {
     return this.loaded;
@@ -54,8 +83,9 @@ export class IncidentStore {
     const changes: IncidentChange[] = [];
     const seen = new Set<string>();
     const nonEmpty = window.incidents.length + window.unlocated.length > 0;
-    for (const next of window.incidents) {
-      seen.add(next.id);
+    for (const raw of window.incidents) {
+      seen.add(raw.id);
+      const next = this.withExpiry(raw);
       const change = this.upsert(next);
       if (change && this.loaded) changes.push(change);
     }
@@ -101,7 +131,7 @@ export class IncidentStore {
   }
 
   activeIncidents(): Incident[] {
-    return [...this.incidents.values()].filter((i) => i.status !== 'resolved');
+    return [...this.incidents.values()].filter((i) => isLive(i.status));
   }
 
   areas(): AreaRecord[] {
@@ -123,10 +153,11 @@ export class IncidentStore {
   private upsert(next: Incident): IncidentChange | undefined {
     const prev = this.incidents.get(next.id);
     this.incidents.set(next.id, next);
-    if (!prev) return next.status === 'resolved' ? undefined : { event: 'incident.created', data: next };
+    if (!prev) return isLive(next.status) ? { event: 'incident.created', data: next } : undefined;
     if (sameIncident(prev, next)) return undefined;
-    if (prev.status !== 'resolved' && next.status === 'resolved') return { event: 'incident.resolved', data: next };
-    return next.status === 'resolved' ? undefined : { event: 'incident.updated', data: next };
+    if (isLive(prev.status) && !isLive(next.status)) return { event: 'incident.resolved', data: next };
+    if (!isLive(prev.status) && isLive(next.status)) return { event: 'incident.created', data: next };
+    return isLive(next.status) ? { event: 'incident.updated', data: next } : undefined;
   }
 
   /** Calls inside the fetched range that the source no longer lists are gone: close them rather than leave them active. */
@@ -135,7 +166,7 @@ export class IncidentStore {
     for (const [id, i] of this.incidents) {
       if (seen.has(id) || Date.parse(i.createdAt) <= windowStartMs) continue;
       this.incidents.delete(id);
-      if (i.status !== 'resolved' && this.loaded) {
+      if (isLive(i.status) && this.loaded) {
         changes.push({ event: 'incident.resolved', data: { ...i, status: 'resolved', resolvedAt: nowIso, updatedAt: nowIso } });
       }
     }

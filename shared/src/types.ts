@@ -18,7 +18,11 @@ export const INCIDENT_TYPES = [
 ] as const;
 export type IncidentType = (typeof INCIDENT_TYPES)[number];
 
-export type IncidentStatus = 'dispatched' | 'on_scene' | 'resolved';
+/**
+ * `expired` = non chiusa nella fonte ma senza aggiornamenti da troppo tempo: la chiusura non è stata
+ * registrata, quindi NON è più considerata in corso (né attiva nei conteggi).
+ */
+export type IncidentStatus = 'dispatched' | 'on_scene' | 'resolved' | 'expired';
 /** 1 = critica (priorità A), 2 = alta (B), 3 = normale (C) */
 export type Priority = 1 | 2 | 3;
 
@@ -91,7 +95,7 @@ export interface SourceStatus {
 
 /** Contatori comuni a tutti i livelli */
 export interface Counts {
-  /** chiamate non risolte, con posizione */
+  /** chiamate in corso (non chiuse e aggiornate di recente), con posizione */
   active: number;
   /** chiamate ricevute nelle ultime 24 h (incluse quelle senza posizione) */
   last24h: number;
@@ -113,8 +117,8 @@ export interface CitySummary extends Counts {
   generatedAt: string;
   /** chiamate ricevute nell'ultima ora */
   ratePerHour: number;
-  /** tempo medio ricezione→dispatch (secondi), solo chiamate non iniziate dall'agente, ultime 24 h; null se pochi dati */
-  avgDispatchSec: number | null;
+  /** mediana ricezione→dispatch (secondi) delle sole chiamate critiche (priorità 1) con posizione, ultime 24 h; null se < 10 campioni */
+  medianCriticalDispatchSec: number | null;
   /** chiamate delle ultime 24 h senza posizione (riservate): contate ma non mappabili */
   unlocated24h: number;
   /** 24 bucket orari, dal più vecchio */
@@ -133,7 +137,7 @@ export interface IntersectionSummary extends Counts {
 
 /** Livello 1: quartiere */
 export interface AreaDetail extends AreaSummary {
-  avgDispatchSec: number | null;
+  medianCriticalDispatchSec: number | null;
   timeline: TimelinePoint[];
   /** incroci con più chiamate (attive prima, poi ultime 24 h), max 50 */
   intersections: IntersectionSummary[];

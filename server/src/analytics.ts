@@ -1,5 +1,6 @@
 import {
   INCIDENT_TYPES,
+  isLive,
   type AreaDetail,
   type AreaInfo,
   type AreaSummary,
@@ -33,8 +34,8 @@ interface Acc {
   last24h: number;
   byType: TypeCounts;
   buckets: TypeCounts[];
-  dispatchSum: number;
-  dispatchN: number;
+  /** ricezione→dispatch (s) delle chiamate critiche ultime 24 h */
+  dispatchWaits: number[];
 }
 
 const newAcc = (): Acc => ({
@@ -43,8 +44,7 @@ const newAcc = (): Acc => ({
   last24h: 0,
   byType: emptyTypeCounts(),
   buckets: Array.from({ length: BUCKETS }, emptyTypeCounts),
-  dispatchSum: 0,
-  dispatchN: 0,
+  dispatchWaits: [],
 });
 
 interface IntersectionAcc extends Acc {
@@ -69,7 +69,12 @@ interface Index {
 
 const sumTypes = (c: TypeCounts): number => INCIDENT_TYPES.reduce((s, t) => s + c[t], 0);
 const countsOf = (a: Acc): Counts => ({ active: a.active, last24h: a.last24h, critical: a.critical, byType: { ...a.byType } });
-const avgDispatch = (a: Acc): number | null => (a.dispatchN < MIN_DISPATCH_SAMPLES ? null : Math.round(a.dispatchSum / a.dispatchN));
+function medianCriticalDispatch(a: Acc): number | null {
+  if (a.dispatchWaits.length < MIN_DISPATCH_SAMPLES) return null;
+  const w = [...a.dispatchWaits].sort((x, y) => x - y);
+  const mid = w.length >> 1;
+  return Math.round(w.length % 2 ? (w[mid] as number) : ((w[mid - 1] as number) + (w[mid] as number)) / 2);
+}
 
 function timelineOf(a: Acc, nowMs: number): TimelinePoint[] {
   const firstHour = Math.floor(nowMs / HOUR_MS) * HOUR_MS - (BUCKETS - 1) * HOUR_MS;
@@ -77,7 +82,7 @@ function timelineOf(a: Acc, nowMs: number): TimelinePoint[] {
 }
 
 function addIncident(acc: Acc, i: Incident, receivedMs: number, nowMs: number): void {
-  if (i.status !== 'resolved') {
+  if (isLive(i.status)) {
     acc.active++;
     acc.byType[i.type]++;
     if (i.priority === 1) acc.critical++;
@@ -87,12 +92,9 @@ function addIncident(acc: Acc, i: Incident, receivedMs: number, nowMs: number): 
   const bucket = BUCKETS - 1 - (Math.floor(nowMs / HOUR_MS) - Math.floor(receivedMs / HOUR_MS));
   const slot = acc.buckets[bucket];
   if (slot) slot[i.type]++;
-  if (!i.officerInitiated && i.dispatchedAt) {
+  if (i.priority === 1 && !i.officerInitiated && i.dispatchedAt) {
     const wait = (Date.parse(i.dispatchedAt) - receivedMs) / 1000;
-    if (wait >= 0) {
-      acc.dispatchSum += wait;
-      acc.dispatchN++;
-    }
+    if (wait >= 0) acc.dispatchWaits.push(wait);
   }
 }
 
@@ -147,7 +149,7 @@ export class Analytics {
       ...countsOf(index.city),
       last24h: index.city.last24h + index.unlocated24h,
       ratePerHour: index.ratePerHour,
-      avgDispatchSec: avgDispatch(index.city),
+      medianCriticalDispatchSec: medianCriticalDispatch(index.city),
       unlocated24h: index.unlocated24h,
       timeline: timelineOf(index.city, index.generatedAt),
       byArea: this.areaSummaries(index),
@@ -171,7 +173,7 @@ export class Analytics {
       .slice(0, MAX_AREA_INTERSECTIONS);
     return {
       ...toAreaSummary(info, acc),
-      avgDispatchSec: avgDispatch(acc),
+      medianCriticalDispatchSec: medianCriticalDispatch(acc),
       timeline: timelineOf(acc, index.generatedAt),
       intersections,
     };

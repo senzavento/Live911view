@@ -1,9 +1,15 @@
-# Live 911 View
+# Live 911 View — San Francisco
 
-Dashboard live degli interventi 911 negli USA con drill-down a 4 livelli:
-**Nazionale → Stato → Città → Singolo incidente**. La mappa passa da bolle aggregate per stato, a bolle per città, a puntini luminosi per tipologia in base allo zoom, in sincronia con i pannelli.
+Dashboard live delle chiamate dispatchate a San Francisco, con drill-down a 4 livelli:
+**San Francisco → Quartiere → Incrocio → Chiamata**. La mappa passa da bolle per quartiere, a bolle per incrocio, a puntini luminosi per categoria in base allo zoom, in sincronia con i pannelli.
 
-> **I dati sono SINTETICI.** Non esiste un feed 911 nazionale pubblico in tempo reale; il server usa un simulatore (nessun dato reale, nessuna PII). L'UI lo dichiara con il badge "DATI SIMULATI". Una sorgente reale (es. open data di singole città) si collega implementando `IncidentSource` (vedi `server/README.md`).
+## Dati: reali, ma con limiti
+Fonte: [DataSF – Law Enforcement Dispatched Calls for Service: Real-Time](https://data.sf.gov/d/gnap-fj3t) (licenza PDDL).
+- **Ritardo 10-20 minuti**: la fonte si aggiorna ogni 10 min e ha altri 10 min di ritardo.
+- **Solo polizia, sceriffo, MTA e HEART.** Niente fuoco né soccorso medico (quel dataset si aggiorna una volta al giorno).
+- **~31% delle chiamate è "sensibile" e non ha posizione**: viene contata ma mai mostrata sulla mappa, e non si tenta di dedurla. Le note libere non sono usate; le categorie delicate (suicidio, violenza domestica, salute mentale…) mostrano solo l'etichetta generica.
+- **"In corso" è una stima**: la fonte spesso non registra la chiusura, quindi una chiamata senza aggiornamenti da più di 2 ore (30 min per multe e fermi) è considerata scaduta. Vedi `docs/CONTRACT.md`.
+- Posizioni a livello di incrocio, già mascherate dalla fonte.
 
 ## Avvio
 
@@ -15,12 +21,9 @@ npm run typecheck
 ```
 
 ## Struttura
-
 - `shared/` tipi e tema condivisi (contratto dati)
-- `server/` Fastify: simulatore, aggregazioni, API REST + SSE (`docs/CONTRACT.md`)
-- `web/` Vite + TypeScript + MapLibre GL: `src/map/` (mappa), `src/panels/` (pannelli), `src/store/` (stato live)
+- `server/` Fastify: sorgente DataSF (polling), store 48 h, aggregazioni, API REST + SSE (`docs/CONTRACT.md`, `server/README.md`)
+- `web/` Vite + TypeScript + MapLibre GL: `src/map/`, `src/panels/`, `src/store/`
 
-## Note
-
-- La basemap usa tile CARTO pubblici (nessuna API key); se non raggiungibili la mappa resta utilizzabile su sfondo scuro.
-- Le durate degli incidenti simulati sono compresse (minuti), quindi il "tempo medio di invio" (~90 s) non è un dato realistico.
+## Deploy
+Raspberry Pi con Docker o systemd: `docs/DEPLOY-RASPBERRY.md`. Immagine multi-arch su GHCR costruita da GitHub Actions. La basemap è opzionale e si configura a runtime con una tua chiave (`BASEMAP_TILES`), mai nel repo né nell'immagine.
