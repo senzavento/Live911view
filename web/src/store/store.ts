@@ -1,9 +1,9 @@
-import type { Incident, NationalSummary, StreamEvent } from '@live911/shared';
+import type { CitySummary, Incident, StreamEvent } from '@live911/shared';
 
-/** Selezione di drill-down: nazionale → stato → città → incidente. */
+/** Selezione di drill-down: San Francisco → quartiere → incrocio → chiamata. */
 export interface Selection {
-  state?: string;
-  cityId?: string;
+  areaId?: string;
+  intersectionId?: string;
   incidentId?: string;
 }
 
@@ -21,7 +21,7 @@ type Listener = (e: StoreEvent) => void;
 /** Stato live dell'app. Unica fonte di verità per mappa e pannelli. */
 export class Store {
   readonly incidents = new Map<string, Incident>();
-  summary: NationalSummary | null = null;
+  summary: CitySummary | null = null;
   selection: Selection = {};
   connection: ConnectionStatus = 'connecting';
 

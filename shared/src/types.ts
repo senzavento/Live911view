@@ -1,109 +1,157 @@
 /**
  * Contratto dati condiviso tra server e web.
- * Tutti i dati sono SINTETICI (simulatore): nessun dato reale di cittadini.
+ * Sorgente: DataSF "Law Enforcement Dispatched Calls for Service: Real-Time" (dati reali, pubblici,
+ * ritardati di ~10-20 min, solo chiamate dispatchate a polizia/sceriffo/MTA/HEART). Licenza PDDL.
+ * Le chiamate "sensibili" non hanno posizione: non sono mai esposte come Incident, solo contate.
  */
 
-export const INCIDENT_TYPES = ['fire', 'medical', 'police', 'traffic', 'hazmat', 'rescue'] as const;
+/** Categorie derivate dai call type della CAD (mappatura nel server). */
+export const INCIDENT_TYPES = [
+  'violent', // violenza / armi
+  'property', // reati contro il patrimonio
+  'traffic', // incidenti e pericoli stradali
+  'disturbance', // disturbo, persone/veicoli sospetti
+  'welfare', // assistenza, benessere, persone scomparse
+  'alarm', // allarmi
+  'proactive', // attività di polizia (fermi, multe, appuntamenti)
+  'other',
+] as const;
 export type IncidentType = (typeof INCIDENT_TYPES)[number];
 
 export type IncidentStatus = 'dispatched' | 'on_scene' | 'resolved';
-/** 1 = critica, 2 = alta, 3 = normale */
+/** 1 = critica (priorità A), 2 = alta (B), 3 = normale (C) */
 export type Priority = 1 | 2 | 3;
 
+/** Livello 3: singola chiamata con posizione (a livello di incrocio, già mascherata dalla fonte). */
 export interface Incident {
+  /** CAD number */
   id: string;
   type: IncidentType;
   priority: Priority;
   status: IncidentStatus;
-  cityId: string;
-  /** Codice stato USPS a 2 lettere, es. "TX" */
-  state: string;
+  areaId: string; // quartiere, slug (es. "mission"); "unknown" se assente
+  areaName: string;
+  intersectionId: string;
+  /** es. "MINNA ST \\ RUSS ST" */
+  address: string;
   lat: number;
   lng: number;
-  /** Indirizzo sintetico a livello di isolato, es. "1200 block of Main St" */
-  address: string;
+  /** Descrizione originale della fonte, o etichetta generica per categorie delicate (suicidio, violenza domestica, salute mentale...). */
   description: string;
-  unitsAssigned: number;
-  /** ISO 8601 UTC */
+  /** Police | Sheriff | Municipal Transportation Agency | HEART | ... */
+  agency: string;
+  /** true = iniziata dall'agente (on-view), non da una chiamata 911 */
+  officerInitiated: boolean;
+  /** ISO 8601 UTC (la fonte è in ora di San Francisco: il server converte) */
   createdAt: string;
+  dispatchedAt?: string;
+  onSceneAt?: string;
   updatedAt: string;
   resolvedAt?: string;
 }
 
-export interface City {
-  id: string; // slug, es. "houston-tx"
+export interface AreaInfo {
+  id: string;
   name: string;
-  state: string;
+  /** centroide ricavato dalle posizioni osservate */
   lat: number;
   lng: number;
-  population: number;
 }
 
-export interface StateInfo {
-  code: string;
+export interface IntersectionInfo {
+  id: string;
   name: string;
+  areaId: string;
   lat: number;
   lng: number;
 }
 
 export type TypeCounts = Record<IncidentType, number>;
 
-/** Livello 0: aggregato nazionale */
-export interface NationalSummary {
-  generatedAt: string;
-  active: number;
-  last24h: number;
-  /** nuovi incidenti al minuto, media mobile ultimi 5 min */
-  ratePerMin: number;
-  critical: number;
-  avgResponseSec: number;
-  byType: TypeCounts;
-  byState: StateSummary[];
-  /** serie ultimi 60 minuti, un bucket al minuto, dal più vecchio */
-  timeline: TimelinePoint[];
-}
-
 export interface TimelinePoint {
+  /** inizio del bucket orario, ISO UTC */
   t: string;
   total: number;
   byType: TypeCounts;
 }
 
-/** Livello 1: stato */
-export interface StateSummary {
-  code: string;
+/** Stato della sorgente dati, mostrato in UI per trasparenza. */
+export interface SourceStatus {
   name: string;
-  active: number;
-  critical: number;
-  byType: TypeCounts;
-  /** incidenti attivi per 100k abitanti */
-  per100k: number;
+  url: string;
+  license: string;
+  /** ultimo `data_as_of` della fonte (ISO UTC), null se mai caricato */
+  dataAsOf: string | null;
+  /** ritardo stimato tra ora e dataAsOf, secondi */
+  delaySec: number | null;
+  lastPollAt: string | null;
+  ok: boolean;
+  lastError?: string;
 }
 
-/** Livello 2: città */
-export interface CitySummary {
-  city: City;
+/** Contatori comuni a tutti i livelli */
+export interface Counts {
+  /** chiamate non risolte, con posizione */
   active: number;
-  critical: number;
+  /** chiamate ricevute nelle ultime 24 h (incluse quelle senza posizione) */
   last24h: number;
+  /** attive con priorità 1 */
+  critical: number;
   byType: TypeCounts;
-  avgResponseSec: number;
+}
+
+/** Livello 1 (riga di classifica): quartiere */
+export interface AreaSummary extends Counts {
+  id: string;
+  name: string;
+  lat: number;
+  lng: number;
+}
+
+/** Livello 0: San Francisco intera */
+export interface CitySummary extends Counts {
+  generatedAt: string;
+  /** chiamate ricevute nell'ultima ora */
+  ratePerHour: number;
+  /** tempo medio ricezione→dispatch (secondi), solo chiamate non iniziate dall'agente, ultime 24 h; null se pochi dati */
+  avgDispatchSec: number | null;
+  /** chiamate delle ultime 24 h senza posizione (riservate): contate ma non mappabili */
+  unlocated24h: number;
+  /** 24 bucket orari, dal più vecchio */
   timeline: TimelinePoint[];
+  byArea: AreaSummary[];
+  source: SourceStatus;
 }
 
-export interface StateDetail extends StateSummary {
-  cities: CitySummary[];
+export interface IntersectionSummary extends Counts {
+  id: string;
+  name: string;
+  areaId: string;
+  lat: number;
+  lng: number;
 }
 
-/** Livello 3: singolo incidente = Incident (GET /api/incidents/:id) */
+/** Livello 1: quartiere */
+export interface AreaDetail extends AreaSummary {
+  avgDispatchSec: number | null;
+  timeline: TimelinePoint[];
+  /** incroci con più chiamate (attive prima, poi ultime 24 h), max 50 */
+  intersections: IntersectionSummary[];
+}
 
-/** Eventi SSE su GET /api/stream */
+/** Livello 2: incrocio */
+export interface IntersectionDetail extends IntersectionSummary {
+  /** chiamate degli ultimi 2 giorni all'incrocio, più recenti prima, max 100 */
+  incidents: Incident[];
+}
+
+/** Eventi SSE su GET /api/stream (solo chiamate con posizione, non risolte nello snapshot). */
 export type StreamEvent =
-  | { event: 'snapshot'; data: { incidents: Incident[]; summary: NationalSummary } }
+  | { event: 'snapshot'; data: { incidents: Incident[]; summary: CitySummary } }
   | { event: 'incident.created'; data: Incident }
   | { event: 'incident.updated'; data: Incident }
   | { event: 'incident.resolved'; data: Incident }
-  | { event: 'summary'; data: NationalSummary };
+  | { event: 'summary'; data: CitySummary };
 
 /** Basemap raster opzionale, configurata a runtime dall'operatore (mai nel codice/immagine). */
 export interface BasemapConfig {
@@ -111,7 +159,7 @@ export interface BasemapConfig {
   tiles: string;
   tileSize: 256 | 512;
   maxzoom: number;
-  /** Testo semplice (es. "© OpenStreetMap contributors © MapTiler"); il client lo mostra come testo. */
+  /** Testo semplice; il client lo mostra come testo. */
   attribution: string;
 }
 
