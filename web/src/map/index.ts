@@ -11,6 +11,7 @@ import { cityFeatures, collection, incidentFeature, pulseFeatures, stateFeatures
 import type { PointFeature } from './features';
 import { STATE_GEO_BY_CODE, US_BOUNDS } from './geo-data';
 import type { LngLatPoint } from './geo-data';
+import { addBasemap, fetchBasemap } from './basemap';
 import { BG_COLOR, LAYER, SRC, addDataLayers, baseStyle, setLevelVisibility } from './layers';
 import { describeView, levelForZoom } from './levels';
 import type { MapLevel } from './levels';
@@ -305,9 +306,13 @@ export function mountMap(el: HTMLElement, store: Store, opts: MountMapOptions = 
   document.addEventListener('visibilitychange', onVisibility);
   const unsub = store.subscribe(onStoreEvent);
 
+  const basemapAbort = new AbortController();
   map.on('load', () => {
     if (destroyed) return;
     addDataLayers(map, collection([]));
+    void fetchBasemap(basemapAbort.signal).then((cfg) => {
+      if (cfg && !destroyed) addBasemap(map, cfg, LAYER.stateGlow);
+    });
     ready = true;
     level = levelForZoom(map.getZoom(), store.selection);
     setLevelVisibility(map, level);
@@ -332,6 +337,7 @@ export function mountMap(el: HTMLElement, store: Store, opts: MountMapOptions = 
 
   return () => {
     destroyed = true;
+    basemapAbort.abort();
     if (raf) cancelAnimationFrame(raf);
     raf = 0;
     unsub();

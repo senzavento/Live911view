@@ -104,3 +104,18 @@ export type StreamEvent =
   | { event: 'incident.updated'; data: Incident }
   | { event: 'incident.resolved'; data: Incident }
   | { event: 'summary'; data: NationalSummary };
+
+/** Basemap raster opzionale, configurata a runtime dall'operatore (mai nel codice/immagine). */
+export interface BasemapConfig {
+  /** Template XYZ https con {z}/{x}/{y} */
+  tiles: string;
+  tileSize: 256 | 512;
+  maxzoom: number;
+  /** Testo semplice (es. "© OpenStreetMap contributors © MapTiler"); il client lo mostra come testo. */
+  attribution: string;
+}
+
+/** GET /api/config */
+export interface AppConfig {
+  basemap: BasemapConfig | null;
+}

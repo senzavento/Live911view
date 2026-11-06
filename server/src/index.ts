@@ -11,7 +11,7 @@ async function main(): Promise<void> {
   if (staticDir && !existsSync(staticDir)) throw new Error(`STATIC_DIR does not exist: ${staticDir} (run "npm run build")`);
   let onError: (err: unknown) => void = (err) => console.error(err);
   const runtime = createRuntime({ seed: config.simSeed, rate: config.simRate, onError: (e) => onError(e) });
-  const app = await buildApp(runtime, { corsOrigins: config.corsOrigins, logger: { level: config.logLevel }, staticDir });
+  const app = await buildApp(runtime, { corsOrigins: config.corsOrigins, logger: { level: config.logLevel }, staticDir, basemap: config.basemap });
   onError = (err) => app.log.error(err);
 
   runtime.start();

@@ -1,6 +1,7 @@
 import cors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
 import Fastify, { type FastifyError, type FastifyInstance, type FastifyServerOptions } from 'fastify';
+import type { AppConfig, BasemapConfig } from '@live911/shared';
 import type { Runtime } from './runtime';
 import { parseIncidentQuery } from './validation';
 
@@ -9,6 +10,8 @@ export interface AppOptions {
   logger: FastifyServerOptions['logger'];
   /** Directory of the built web app; when set it is served at `/` (single-port deployment). */
   staticDir?: string;
+  /** Optional basemap handed to the web client via GET /api/config. */
+  basemap?: BasemapConfig | null;
 }
 
 export async function buildApp(rt: Runtime, opts: AppOptions): Promise<FastifyInstance> {
@@ -31,7 +34,7 @@ export async function buildApp(rt: Runtime, opts: AppOptions): Promise<FastifyIn
     reply.code(status).send({ error: status === 500 ? 'Internal server error' : error.message });
   });
 
-  registerRoutes(app, rt);
+  registerRoutes(app, rt, { basemap: opts.basemap ?? null });
   if (opts.staticDir) {
     // Registered after the API routes; unknown /api/* paths still hit the JSON 404 handler.
     await app.register(fastifyStatic, { root: opts.staticDir, wildcard: true, index: 'index.html' });
@@ -39,7 +42,9 @@ export async function buildApp(rt: Runtime, opts: AppOptions): Promise<FastifyIn
   return app;
 }
 
-function registerRoutes(app: FastifyInstance, rt: Runtime): void {
+function registerRoutes(app: FastifyInstance, rt: Runtime, config: AppConfig): void {
+  app.get('/api/config', async () => config);
+
   app.get('/api/health', async () => ({
     ok: true,
     simulated: true,

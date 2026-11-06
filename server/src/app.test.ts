@@ -124,3 +124,17 @@ describe('static web app', () => {
     await staticApp.close();
   });
 });
+
+describe('GET /api/config', () => {
+  it('has no basemap by default', async () => {
+    const plain = await testApp(rt);
+    expect((await plain.inject('/api/config')).json()).toEqual({ basemap: null });
+    await plain.close();
+  });
+  it('exposes the configured basemap', async () => {
+    const basemap = { tiles: 'https://t.example.com/{z}/{x}/{y}.png', tileSize: 256 as const, maxzoom: 18, attribution: '© t' };
+    const withMap = await testApp(rt, { basemap });
+    expect((await withMap.inject('/api/config')).json()).toEqual({ basemap });
+    await withMap.close();
+  });
+});

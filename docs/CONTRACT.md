@@ -6,6 +6,7 @@ Tipi: `shared/src/types.ts`. **Dati sintetici** generati da un simulatore (non e
 | Endpoint | Risposta | Livello |
 |---|---|---|
 | `GET /api/health` | `{ ok: true, simulated: true, uptimeSec }` | – |
+| `GET /api/config` | `AppConfig` (`{ basemap: BasemapConfig \| null }`, configurata via env sul server) | – |
 | `GET /api/summary` | `NationalSummary` | 0 – nazionale |
 | `GET /api/states/:code` | `StateDetail` (404 se ignoto) | 1 – stato |
 | `GET /api/cities` | `City[]` | – |

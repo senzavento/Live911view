@@ -36,22 +36,12 @@ export const LEVEL_LAYERS: Record<MapLevel, string[]> = {
 
 export const BG_COLOR = '#0a0f18';
 
+/** Solid dark background only: the raster basemap is optional and added at runtime (see basemap.ts). */
 export function baseStyle(): StyleSpecification {
   return {
     version: 8,
-    sources: {
-      basemap: {
-        type: 'raster',
-        tiles: ['a', 'b', 'c', 'd'].map((s) => `https://${s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}@2x.png`),
-        tileSize: 256,
-        maxzoom: 18,
-        attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/attributions">CARTO</a>',
-      },
-    },
-    layers: [
-      { id: 'bg', type: 'background', paint: { 'background-color': BG_COLOR } },
-      { id: 'basemap', type: 'raster', source: 'basemap', paint: { 'raster-opacity': 0.9, 'raster-fade-duration': 150 } },
-    ],
+    sources: {},
+    layers: [{ id: 'bg', type: 'background', paint: { 'background-color': BG_COLOR } }],
   };
 }
 

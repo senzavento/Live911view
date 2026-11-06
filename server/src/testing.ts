@@ -1,4 +1,4 @@
-import { buildApp } from './app';
+import { buildApp, type AppOptions } from './app';
 import { createRuntime, type Runtime } from './runtime';
 import { Simulator } from './sim/simulator';
 
@@ -19,6 +19,6 @@ export function testRuntime(seed = 42, rate = 16): { rt: Runtime; sim: Simulator
   };
 }
 
-export async function testApp(rt: Runtime, extra: { staticDir?: string } = {}) {
+export async function testApp(rt: Runtime, extra: Pick<AppOptions, 'staticDir' | 'basemap'> = {}) {
   return buildApp(rt, { corsOrigins: ['http://localhost:5173'], logger: false, ...extra });
 }

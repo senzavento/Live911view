@@ -23,6 +23,11 @@ API: see `docs/CONTRACT.md`.
 | `SIM_SEED` | time-based | RNG seed; same seed + same virtual clock = same incidents |
 | `CORS_ORIGIN` | `http://localhost:5173` | allowed origin(s), comma-separated |
 | `LOG_LEVEL` | `info` | Fastify/pino level |
+| `STATIC_DIR` | unset | built web app to serve at `/` |
+| `BASEMAP_TILES` | unset | optional raster basemap, https XYZ template with `{z}/{x}/{y}` (may contain an API key: keep it in env, never in the repo/image) |
+| `BASEMAP_ATTRIBUTION` | `© OpenStreetMap contributors` | plain-text attribution required by your tile provider |
+| `BASEMAP_TILE_SIZE` | `256` | `256` or `512` |
+| `BASEMAP_MAX_ZOOM` | `18` | max zoom of the tiles |
 
 ## Layout
 

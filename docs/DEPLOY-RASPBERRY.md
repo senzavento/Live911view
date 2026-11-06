@@ -81,3 +81,36 @@ Configurazione: modifica `environment` in `compose.yaml` (`SIM_RATE`, `LOG_LEVEL
 Il container gira come utente non root, con filesystem in sola lettura, tutte le capability rimosse e limite di memoria di 400 MB. Non esporlo a Internet (nessuna autenticazione).
 
 > La build del Dockerfile non è stata provata nella sandbox (nessun demone Docker disponibile): ne ho verificato i singoli passi (dipendenze di produzione e avvio del bundle). Se `docker compose up` dà errori, incollali.
+
+
+---
+
+# Basemap della mappa (chiave API)
+
+Senza configurazione la mappa mostra solo lo sfondo scuro con i dati (nessuna cartografia). Per avere la cartografia serve un provider di tile con una tua chiave (i tile CARTO gratuiti ora richiedono una API key). La chiave **non va mai nel repository né nell'immagine** (l'immagine su GHCR è pubblica): si passa a runtime sul Pi.
+
+Esempi di template (verifica nome stile e termini d'uso nel tuo account provider):
+
+| Provider | `BASEMAP_TILES` | `BASEMAP_ATTRIBUTION` |
+|---|---|---|
+| MapTiler | `https://api.maptiler.com/maps/dataviz-dark/{z}/{x}/{y}.png?key=LA_TUA_CHIAVE` | `© MapTiler © OpenStreetMap contributors` |
+| Stadia Maps | `https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}.png?api_key=LA_TUA_CHIAVE` | `© Stadia Maps © OpenMapTiles © OpenStreetMap contributors` |
+
+Sul Pi, con un file di ambiente leggibile solo da te:
+```bash
+umask 077
+cat > ~/live911.env <<'ENV'
+BASEMAP_TILES=https://api.maptiler.com/maps/dataviz-dark/{z}/{x}/{y}.png?key=LA_TUA_CHIAVE
+BASEMAP_ATTRIBUTION=© MapTiler © OpenStreetMap contributors
+SIM_RATE=8
+ENV
+docker pull ghcr.io/senzavento/live911view:claude-911-dashboard-monitoring-2uk0jr
+docker rm -f live911view
+docker run -d --name live911view --restart unless-stopped -p 8787:8787 \
+  --env-file ~/live911.env --read-only --tmpfs /tmp \
+  --cap-drop ALL --security-opt no-new-privileges:true \
+  ghcr.io/senzavento/live911view:claude-911-dashboard-monitoring-2uk0jr
+```
+Con Compose: aggiungi `env_file: [~/live911.env]` al servizio.
+
+La chiave è visibile a chi apre la dashboard (viaggia nell'URL dei tile verso il browser): usa una chiave dedicata, con limite di richieste o restrizione di origine se il provider la offre.
