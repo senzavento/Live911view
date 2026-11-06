@@ -206,37 +206,22 @@ export class Simulator implements IncidentSource {
   }
 
   private emitHistory(fromMs: number, toMs: number): void {
+    const chunkSec = HISTORY_CHUNK_MS / 1000;
     for (let start = fromMs; start < toMs; start += HISTORY_CHUNK_MS) {
       const mid = start + HISTORY_CHUNK_MS / 2;
-      const total = this.computeWeights(mid);
-      const scale = (this.opts.ratePerSec * (HISTORY_CHUNK_MS / 1000)) / this.totalPopulation;
+      this.computeWeights(mid);
       this.opts.cities.forEach((city, c) => {
-        const counts = this.sampleHistoryCounts(c, scale * (this.cityWeights[c] as number) / this.citySum(c));
-        if (counts) this.emit({ kind: 'history', cityId: city.id, at: mid, counts });
+        const scale = (this.opts.ratePerSec * chunkSec * city.population) / this.totalPopulation;
+        const counts = {} as TypeCounts;
+        let any = false;
+        INCIDENT_TYPES.forEach((type, t) => {
+          const n = this.rng.poisson(scale * (this.typeWeights[c * TYPE_COUNT + t] as number));
+          counts[type] = n;
+          any ||= n > 0;
+        });
+        if (any) this.emit({ kind: 'history', cityId: city.id, at: mid, counts });
       });
-      void total;
     }
-  }
-
-  /** Σ of type weights for one city (the per-city activity multiplier). */
-  private citySum(cityIdx: number): number {
-    const base = cityIdx * TYPE_COUNT;
-    let sum = 0;
-    for (let t = 0; t < TYPE_COUNT; t++) sum += this.typeWeights[base + t] as number;
-    return sum;
-  }
-
-  private sampleHistoryCounts(cityIdx: number, cityMean: number): TypeCounts | null {
-    const sum = this.citySum(cityIdx);
-    const base = cityIdx * TYPE_COUNT;
-    const counts = {} as TypeCounts;
-    let any = false;
-    INCIDENT_TYPES.forEach((type, t) => {
-      const n = this.rng.poisson((cityMean * sum * (this.typeWeights[base + t] as number)) / sum);
-      counts[type] = n;
-      any ||= n > 0;
-    });
-    return any ? counts : null;
   }
 }
 
