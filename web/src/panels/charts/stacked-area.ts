@@ -14,22 +14,25 @@ export interface StackResult {
   xs: number[];
 }
 
+/** Totale di un bucket sui soli `types`. */
+export function bucketTotal(p: TimelinePoint, types: readonly IncidentType[]): number {
+  return types.reduce((a, t) => a + (p.byType[t] ?? 0), 0);
+}
+
 /**
  * Calcola i path SVG di un'area impilata (funzione pura, testabile).
- * `only` limita il grafico a un solo tipo.
+ * `types` limita le categorie incluse (default: tutte).
  */
 export function stackSeries(
   points: readonly TimelinePoint[],
   width: number,
   height: number,
-  only: IncidentType | null = null,
+  types: readonly IncidentType[] = INCIDENT_TYPES,
 ): StackResult {
-  const types: readonly IncidentType[] = only ? [only] : INCIDENT_TYPES;
   const n = points.length;
   if (n === 0) return { paths: [], max: 0, xs: [] };
-  const totals = points.map((p) => types.reduce((a, t) => a + (p.byType[t] ?? 0), 0));
-  const max = Math.max(1, ...totals);
-  const top = 4; // margine superiore
+  const max = Math.max(1, ...points.map((p) => bucketTotal(p, types)));
+  const top = 4;
   const plotH = height - top;
   const xs = points.map((_, i) => (n === 1 ? width / 2 : (i / (n - 1)) * width));
   const y = (v: number): number => top + plotH - (v / max) * plotH;
@@ -50,14 +53,25 @@ export function stackSeries(
   return { paths, max, xs };
 }
 
+/** Bucket con il totale più alto (null se vuoto o tutto a zero). */
+export function peakOf(points: readonly TimelinePoint[], types: readonly IncidentType[] = INCIDENT_TYPES): { t: string; total: number } | null {
+  let best: { t: string; total: number } | null = null;
+  for (const p of points) {
+    const total = bucketTotal(p, types);
+    if (total > 0 && (!best || total > best.total)) best = { t: p.t, total };
+  }
+  return best;
+}
+
 export interface StackedArea {
   el: HTMLElement;
-  update(points: readonly TimelinePoint[], only?: IncidentType | null): void;
+  update(points: readonly TimelinePoint[], types?: readonly IncidentType[]): void;
 }
 
 const W = 300;
 const H = 84;
 
+/** Timeline a 24 bucket orari, area impilata per categoria (SVG, nessuna libreria). */
 export function createStackedArea(label: string): StackedArea {
   const guide = svg('line', { class: 'chart__guide', attrs: { y1: 0, y2: H } });
   guide.style.display = 'none';
@@ -74,17 +88,18 @@ export function createStackedArea(label: string): StackedArea {
   const readout = h('div', { class: 'chart__readout', attrs: { 'aria-hidden': 'true' } });
   const maxLabel = h('span', { class: 'chart__ymax', attrs: { 'aria-hidden': 'true' } });
   const empty = h('div', { class: 'chart__empty', text: 'Nessun dato nella finestra' });
+  const peak = h('p', { class: 'chart__peak' });
   const axis = h(
     'div',
     { class: 'chart__axis', attrs: { 'aria-hidden': 'true' } },
-    h('span', { text: '−60 min' }),
-    h('span', { text: '−30' }),
+    h('span', { text: '−24 h' }),
+    h('span', { text: '−12 h' }),
     h('span', { text: 'ora' }),
   );
-  const el = h('div', { class: 'chart' }, h('div', { class: 'chart__plot' }, root, maxLabel, readout, empty), axis);
+  const el = h('div', { class: 'chart' }, h('div', { class: 'chart__plot' }, root, maxLabel, readout, empty), axis, peak);
 
   let pts: readonly TimelinePoint[] = [];
-  let only: IncidentType | null = null;
+  let shown: readonly IncidentType[] = INCIDENT_TYPES;
   let stack: StackResult = { paths: [], max: 0, xs: [] };
   const pathEls = new Map<IncidentType, SVGPathElement>();
 
@@ -100,9 +115,7 @@ export function createStackedArea(label: string): StackedArea {
     guide.setAttribute('x1', String(x));
     guide.setAttribute('x2', String(x));
     guide.style.display = '';
-    const types: readonly IncidentType[] = only ? [only] : INCIDENT_TYPES;
-    const total = types.reduce((a, t) => a + (p.byType[t] ?? 0), 0);
-    setText(readout, `${fmtTime(p.t)} · ${fmtInt(total)}`);
+    setText(readout, `${fmtTime(p.t)} · ${fmtInt(bucketTotal(p, shown))}`);
     readout.style.display = 'block';
   }
   function onLeave(): void {
@@ -114,18 +127,18 @@ export function createStackedArea(label: string): StackedArea {
 
   return {
     el,
-    update(points, onlyType = null) {
+    update(points, types = INCIDENT_TYPES) {
       pts = points;
-      only = onlyType;
-      stack = stackSeries(points, W, H, only);
+      shown = types;
+      stack = stackSeries(points, W, H, types);
       empty.style.display = points.length ? 'none' : 'flex';
-      setText(maxLabel, stack.max ? fmtInt(stack.max) : '');
+      setText(maxLabel, stack.max && points.length ? fmtInt(stack.max) : '');
       const keep = new Set<IncidentType>();
       for (const p of stack.paths) {
         keep.add(p.type);
         let pe = pathEls.get(p.type);
         if (!pe) {
-          pe = svg('path', { class: 'chart__area', vars: {} });
+          pe = svg('path', { class: 'chart__area' });
           pe.setAttribute('fill', TYPE_META[p.type].color);
           pe.setAttribute('stroke', TYPE_META[p.type].color);
           layer.append(pe);
@@ -133,14 +146,21 @@ export function createStackedArea(label: string): StackedArea {
         }
         pe.setAttribute('d', p.d);
       }
+      // mantiene l'ordine di impilamento
+      for (const p of stack.paths) {
+        const pe = pathEls.get(p.type);
+        if (pe) layer.append(pe);
+      }
       for (const [t, pe] of pathEls) {
         if (!keep.has(t)) {
           pe.remove();
           pathEls.delete(t);
         }
       }
-      const total = points.reduce((a, p) => a + p.total, 0);
-      setAttr(root, 'aria-label', `${label}: ${fmtInt(total)} incidenti negli ultimi ${points.length} minuti`);
+      const total = points.reduce((a, p) => a + bucketTotal(p, types), 0);
+      const pk = peakOf(points, types);
+      setText(peak, pk ? `Picco alle ${fmtTime(pk.t)}: ${fmtInt(pk.total)} chiamate/ora · ora di San Francisco` : '');
+      setAttr(root, 'aria-label', `${label}: ${fmtInt(total)} chiamate in ${points.length} ore${pk ? `, picco alle ${fmtTime(pk.t)} con ${fmtInt(pk.total)}` : ''}`);
     },
   };
 }

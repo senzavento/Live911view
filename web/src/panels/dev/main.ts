@@ -9,6 +9,8 @@ installMock(world, 120);
 world.start(2000);
 const params = new URLSearchParams(location.search);
 if (params.has('fail')) world.failNext = 2;
+const src = params.get('source');
+if (src === 'error' || src === 'stale') world.sourceMode = src;
 
 const el = (id: string): HTMLElement => {
   const n = document.getElementById(id);

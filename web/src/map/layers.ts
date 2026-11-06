@@ -59,9 +59,9 @@ const prio = (crit: number, high: number, norm: number): ExpressionSpecification
 function incRadius(mult: number): ExpressionSpecification {
   return [
     'interpolate', ['linear'], ['zoom'],
-    12, prio(4 * mult, 3.2 * mult, 2.6 * mult),
-    15, prio(6.5 * mult, 5 * mult, 4 * mult),
-    18, prio(11 * mult, 8.6 * mult, 7 * mult),
+    12, prio(4.6 * mult, 3.8 * mult, 3.2 * mult),
+    15, prio(8 * mult, 6.2 * mult, 5 * mult),
+    18, prio(14 * mult, 11 * mult, 9 * mult),
   ] as ExpressionSpecification;
 }
 

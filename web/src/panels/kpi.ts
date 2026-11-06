@@ -13,10 +13,13 @@ export interface KpiOpts {
   hint?: string;
   tone?: 'default' | 'danger';
   animate?: boolean;
+  /** testo quando il valore è null (default "n/d") */
+  nullText?: string;
 }
 
 /** Tessera KPI con animazione numerica leggera (disattivata con prefers-reduced-motion). */
 export function createKpi(opts: KpiOpts): Kpi {
+  const nullText = opts.nullText ?? 'n/d';
   const dd = h('dd', { class: 'kpi__value', text: '–' });
   const el = h(
     'div',
@@ -26,7 +29,7 @@ export function createKpi(opts: KpiOpts): Kpi {
     opts.hint ? h('span', { class: 'kpi__hint', text: opts.hint }) : null,
   );
   let shown: number | null = null;
-  let target: number | null = null;
+  let target: number | null | undefined;
   let raf: number | null = null;
   const animate = opts.animate !== false;
 
@@ -43,7 +46,7 @@ export function createKpi(opts: KpiOpts): Kpi {
       stop();
       if (value === null) {
         shown = null;
-        setText(dd, '–');
+        setText(dd, nullText);
         return;
       }
       if (shown === null || !animate || prefersReducedMotion() || typeof requestAnimationFrame !== 'function') {

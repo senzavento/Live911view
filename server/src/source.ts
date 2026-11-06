@@ -1,35 +1,41 @@
-import type { Incident, TypeCounts } from '@live911/shared';
+import type { Incident, SourceStatus } from '@live911/shared';
 
 /**
- * Counts of incidents that happened in the past but are no longer tracked
- * individually. They only feed the rolling 24h totals.
+ * A call with no public location (reserved or unmapped). Only its identity and
+ * reception time are kept, so it can be counted but never described.
  */
-export interface HistoryBatch {
-  kind: 'history';
-  cityId: string;
-  /** epoch ms the counts are attributed to */
-  at: number;
-  counts: TypeCounts;
+export interface UnlocatedCall {
+  id: string;
+  receivedMs: number;
 }
 
-export type SourceEvent =
-  | { kind: 'created'; incident: Incident }
-  | { kind: 'updated'; incident: Incident }
-  | { kind: 'resolved'; incident: Incident }
-  | HistoryBatch;
+/**
+ * Complete, validated state of the source's time window. The store diffs it against what it holds
+ * and derives the created/updated/resolved events, so a source never has to track changes itself.
+ */
+export interface SourceWindow {
+  kind: 'window';
+  /** Start of the covered window (epoch ms); stored calls received after it but absent here are dropped. */
+  windowStartMs: number;
+  /** Located calls, any status. */
+  incidents: Incident[];
+  unlocated: UnlocatedCall[];
+}
 
+export type SourceEvent = SourceWindow;
 export type SourceListener = (event: SourceEvent) => void;
 export type Unsubscribe = () => void;
 
-/**
- * Where incidents come from. The simulator implements it; a real CAD/911 feed
- * adapter only has to emit the same events (see server/README.md).
- */
+/** Where incidents come from. A new feed only has to emit `SourceWindow`s and report its status. */
 export interface IncidentSource {
   /** Registers a listener. Subscribe before start() so no event is missed. */
   subscribe(listener: SourceListener): Unsubscribe;
-  /** Begins emitting events (may emit an initial backlog synchronously). */
+  /** Begins polling/streaming. Never throws. */
   start(): void;
-  /** Stops emitting and releases timers. Idempotent. */
+  /** Stops and releases timers. Idempotent. */
   stop(): void;
+  /** Current status for transparency in the UI. */
+  status(): SourceStatus;
+  /** Epoch ms of the last successful poll, null if none yet. */
+  lastSuccessAt(): number | null;
 }

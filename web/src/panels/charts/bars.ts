@@ -1,10 +1,11 @@
 import { INCIDENT_TYPES, TYPE_META, type IncidentType, type TypeCounts } from '@live911/shared';
 import { KeyedList, h, setAttr, setText, toggleClass } from '../dom';
 import { fmtInt } from '../format';
+import { typeLabelLong } from '../scope';
 
 export interface TypeBars {
   el: HTMLElement;
-  update(counts: TypeCounts, selected?: IncidentType | null): void;
+  update(counts: TypeCounts, selected?: IncidentType | null, hidden?: readonly IncidentType[]): void;
 }
 
 interface BarItem {
@@ -40,7 +41,7 @@ export function createTypeBars(onSelect?: (t: IncidentType | null) => void): Typ
         'span',
         { class: 'bars__head' },
         h('span', { class: 'dot', attrs: { 'aria-hidden': 'true' } }),
-        h('span', { class: 'bars__label', text: meta.label }),
+        h('span', { class: 'bars__label', text: typeLabelLong(t), attrs: { title: typeLabelLong(t) } }),
         val,
       );
       const track = h('span', { class: 'bars__track', attrs: { 'aria-hidden': 'true' } }, fill);
@@ -62,7 +63,7 @@ export function createTypeBars(onSelect?: (t: IncidentType | null) => void): Typ
           toggleClass(li, 'is-active', item.selected);
           toggleClass(li, 'is-dim', item.dim);
           if (onSelect) setAttr(inner, 'aria-pressed', item.selected ? 'true' : 'false');
-          else setAttr(li, 'aria-label', `${meta.label}: ${fmtInt(item.value)}`);
+          else setAttr(li, 'aria-label', `${typeLabelLong(t)}: ${fmtInt(item.value)}`);
         },
       };
     },
@@ -70,11 +71,11 @@ export function createTypeBars(onSelect?: (t: IncidentType | null) => void): Typ
 
   return {
     el: ul,
-    update(counts, sel = null) {
+    update(counts, sel = null, hidden = []) {
       selected = sel;
-      const max = Math.max(1, ...INCIDENT_TYPES.map((t) => counts[t] ?? 0));
+      const max = Math.max(1, ...INCIDENT_TYPES.filter((t) => !hidden.includes(t)).map((t) => counts[t] ?? 0));
       list.update(
-        sortTypes(counts).map((type) => ({
+        sortTypes(counts).filter((t) => !hidden.includes(t)).map((type) => ({
           type,
           value: counts[type] ?? 0,
           pct: Math.round(((counts[type] ?? 0) / max) * 100),

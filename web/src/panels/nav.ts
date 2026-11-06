@@ -1,5 +1,8 @@
-import type { Incident } from '@live911/shared';
 import type { Selection } from '../store';
+
+export const CITY_NAME = 'San Francisco';
+
+export type Level = 0 | 1 | 2 | 3;
 
 export interface Crumb {
   label: string;
@@ -8,69 +11,58 @@ export interface Crumb {
   current: boolean;
 }
 
-/** "houston-tx" → "TX" (lo slug città termina col codice stato). */
-export function stateOfCityId(cityId: string): string | undefined {
-  const m = /-([a-z]{2})$/i.exec(cityId);
-  return m?.[1]?.toUpperCase();
+/** Livelli superiori noti di una chiamata (da store o da API). */
+export interface Parents {
+  areaId?: string;
+  intersectionId?: string;
 }
+export type IncidentLookup = (incidentId: string) => Parents | undefined;
 
 /**
- * Completa una selezione parziale (es. solo incidentId o solo cityId) ricavando i livelli
- * superiori da incidente / slug città. Restituisce sempre una catena coerente.
+ * Completa una selezione parziale (es. solo incidentId) ricavando i livelli superiori dalla
+ * chiamata nota. Restituisce solo chiavi definite.
  */
-export function normalizeSelection(sel: Selection, incidents: ReadonlyMap<string, Incident>): Selection {
-  const out: Selection = {};
-  let { state, cityId } = sel;
-  const incidentId = sel.incidentId;
+export function normalizeSelection(sel: Selection, lookup?: IncidentLookup): Selection {
+  let { areaId, intersectionId } = sel;
+  const { incidentId } = sel;
   if (incidentId) {
-    const inc = incidents.get(incidentId);
-    if (inc) {
-      state = state ?? inc.state;
-      cityId = cityId ?? inc.cityId;
-    }
+    const p = lookup?.(incidentId);
+    areaId = areaId ?? p?.areaId;
+    intersectionId = intersectionId ?? p?.intersectionId;
   }
-  if (cityId && !state) state = stateOfCityId(cityId);
-  if (state) out.state = state;
-  if (state && cityId) out.cityId = cityId;
-  if (state && cityId && incidentId) out.incidentId = incidentId;
+  const out: Selection = {};
+  if (areaId) out.areaId = areaId;
+  if (intersectionId) out.intersectionId = intersectionId;
+  if (incidentId) out.incidentId = incidentId;
   return out;
 }
 
-export type Level = 0 | 1 | 2 | 3;
-
 export function levelOf(sel: Selection): Level {
-  if (sel.incidentId && sel.cityId && sel.state) return 3;
-  if (sel.cityId && sel.state) return 2;
-  if (sel.state) return 1;
+  if (sel.incidentId) return 3;
+  if (sel.intersectionId) return 2;
+  if (sel.areaId) return 1;
   return 0;
 }
 
 export interface CrumbNames {
-  state?: string;
-  city?: string;
+  area?: string;
+  intersection?: string;
   incident?: string;
 }
 
-/** Breadcrumb "USA › Stato › Città › Incidente" a partire da una selezione normalizzata. */
+/** Breadcrumb "San Francisco › Quartiere › Incrocio › Chiamata" da una selezione normalizzata. */
 export function buildCrumbs(sel: Selection, names: CrumbNames = {}): Crumb[] {
   const level = levelOf(sel);
-  const crumbs: Crumb[] = [{ label: 'USA', target: {}, current: level === 0 }];
-  if (sel.state) {
-    crumbs.push({ label: names.state ?? sel.state, target: { state: sel.state }, current: level === 1 });
+  const crumbs: Crumb[] = [{ label: CITY_NAME, target: {}, current: level === 0 }];
+  if (sel.areaId) {
+    crumbs.push({ label: names.area ?? sel.areaId, target: { areaId: sel.areaId }, current: level === 1 });
   }
-  if (sel.state && sel.cityId) {
-    crumbs.push({
-      label: names.city ?? sel.cityId,
-      target: { state: sel.state, cityId: sel.cityId },
-      current: level === 2,
-    });
+  if (sel.intersectionId) {
+    const target: Selection = sel.areaId ? { areaId: sel.areaId, intersectionId: sel.intersectionId } : { intersectionId: sel.intersectionId };
+    crumbs.push({ label: names.intersection ?? sel.intersectionId, target, current: level === 2 });
   }
-  if (sel.state && sel.cityId && sel.incidentId) {
-    crumbs.push({
-      label: names.incident ?? sel.incidentId,
-      target: { state: sel.state, cityId: sel.cityId, incidentId: sel.incidentId },
-      current: true,
-    });
+  if (sel.incidentId) {
+    crumbs.push({ label: names.incident ?? sel.incidentId, target: { ...sel }, current: true });
   }
   return crumbs;
 }
@@ -78,11 +70,22 @@ export function buildCrumbs(sel: Selection, names: CrumbNames = {}): Crumb[] {
 /** Selezione del livello superiore (per "Indietro"/Esc). */
 export function parentSelection(sel: Selection): Selection {
   const level = levelOf(sel);
-  if (level === 3) return { state: sel.state, cityId: sel.cityId };
-  if (level === 2) return { state: sel.state };
-  return {};
+  const out: Selection = {};
+  if (level === 3) {
+    if (sel.areaId) out.areaId = sel.areaId;
+    if (sel.intersectionId) out.intersectionId = sel.intersectionId;
+  } else if (level === 2 && sel.areaId) {
+    out.areaId = sel.areaId;
+  }
+  return out;
 }
 
 export function selectionKey(sel: Selection): string {
-  return `${sel.state ?? ''}|${sel.cityId ?? ''}|${sel.incidentId ?? ''}`;
+  return `${sel.areaId ?? ''}|${sel.intersectionId ?? ''}|${sel.incidentId ?? ''}`;
+}
+
+export function backLabel(level: Level, hasArea: boolean): string {
+  if (level === 3) return '← Incrocio';
+  if (level === 2) return hasArea ? '← Quartiere' : `← ${CITY_NAME}`;
+  return `← ${CITY_NAME}`;
 }

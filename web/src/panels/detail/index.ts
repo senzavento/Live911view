@@ -1,24 +1,27 @@
 import type { Ctx, Part } from '../ctx';
 import { h, setText } from '../dom';
 import type { Layout } from '../layout';
-import { levelOf, normalizeSelection, parentSelection, selectionKey, type Level } from '../nav';
-import { createCityView } from './city';
+import { backLabel, levelOf, normalizeSelection, parentSelection, selectionKey, type Level } from '../nav';
+import { createAreaView } from './area';
 import type { View } from './common';
 import { createIncidentView } from './incident';
-import { createStateView } from './state';
+import { createIntersectionView } from './intersection';
 
-/** Pannello laterale/bottom sheet che mostra il livello 1-3 in base a store.selection. */
+/** Pannello laterale/bottom sheet che mostra i livelli 1-3 in base a store.selection. */
 export function createDetail(root: HTMLElement, ctx: Ctx, layout: Layout): Part {
   const { store } = ctx;
+  const prevLabel = root.getAttribute('aria-label');
+  root.setAttribute('aria-label', 'Dettaglio della selezione');
+  const norm = () => normalizeSelection(store.selection, ctx.lookupIncident);
   const back = h('button', {
     class: 'btn btn--ghost',
     attrs: { type: 'button' },
-    on: { click: () => ctx.navigate(parentSelection(normalizeSelection(store.selection, store.incidents))) },
+    on: { click: () => ctx.navigate(parentSelection(norm())) },
   });
   const close = h('button', {
     class: 'btn btn--icon',
     text: '×',
-    attrs: { type: 'button', 'aria-label': 'Chiudi dettaglio e torna alla vista nazionale' },
+    attrs: { type: 'button', 'aria-label': 'Chiudi dettaglio e torna a San Francisco' },
     on: { click: () => ctx.navigate({}) },
   });
   const bar = h('div', { class: 'detail__bar' }, back, close);
@@ -31,15 +34,12 @@ export function createDetail(root: HTMLElement, ctx: Ctx, layout: Layout): Part 
   let viewKey = '';
   let level: Level = 0;
 
-  function backLabel(l: Level): string {
-    return l === 3 ? '← Città' : l === 2 ? '← Stato' : '← USA';
-  }
-
   function sync(): void {
-    const sel = normalizeSelection(store.selection, store.incidents);
+    const sel = norm();
     const key = selectionKey(sel);
     const next = levelOf(sel);
     level = next;
+    setText(back, backLabel(next, !!sel.areaId));
     if (key === viewKey) return;
     viewKey = key;
     view?.destroy();
@@ -48,9 +48,8 @@ export function createDetail(root: HTMLElement, ctx: Ctx, layout: Layout): Part 
     root.hidden = next === 0;
     layout.setDetailOpen(next > 0);
     if (next === 0) return;
-    setText(back, backLabel(next));
-    if (next === 1 && sel.state) view = createStateView(ctx, sel.state);
-    else if (next === 2 && sel.cityId) view = createCityView(ctx, sel.cityId);
+    if (next === 1 && sel.areaId) view = createAreaView(ctx, sel.areaId);
+    else if (next === 2 && sel.intersectionId) view = createIntersectionView(ctx, sel.intersectionId, sel.areaId);
     else if (next === 3 && sel.incidentId) view = createIncidentView(ctx, sel.incidentId);
     if (view) body.append(view.el);
     root.scrollTop = 0;
@@ -60,23 +59,28 @@ export function createDetail(root: HTMLElement, ctx: Ctx, layout: Layout): Part 
   const onKey = (e: KeyboardEvent): void => {
     if (e.key === 'Escape' && level > 0 && root.contains(document.activeElement)) {
       e.preventDefault();
-      ctx.navigate(parentSelection(normalizeSelection(store.selection, store.incidents)));
+      ctx.navigate(parentSelection(norm()));
     }
   };
   root.addEventListener('keydown', onKey);
   const unsub = store.subscribe((e) => {
     if (e.kind === 'selection') sync();
   });
+  // il livello 3 può risolvere i livelli superiori solo dopo il caricamento API
+  const unNames = ctx.onNames(sync);
   sync();
 
   return {
     destroy() {
       unsub();
+      unNames();
       root.removeEventListener('keydown', onKey);
       view?.destroy();
       view = null;
       layout.setDetailOpen(false);
       root.hidden = false;
+      if (prevLabel === null) root.removeAttribute('aria-label');
+      else root.setAttribute('aria-label', prevLabel);
       root.replaceChildren();
     },
   };

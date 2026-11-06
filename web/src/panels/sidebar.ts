@@ -1,49 +1,52 @@
-import type { IncidentType, StateSummary } from '@live911/shared';
-import { TYPE_META } from '@live911/shared';
+import { TYPE_META, type AreaSummary, type IncidentType } from '@live911/shared';
 import type { Ctx, Part } from './ctx';
-import { h, rafThrottle, setText, toggleClass } from './dom';
-import { fmtDecimal, fmtInt } from './format';
 import { createTypeBars } from './charts/bars';
 import { createStackedArea } from './charts/stacked-area';
+import { h, rafThrottle, setText, toggleClass } from './dom';
+import { fmtInt } from './format';
 import type { Layout } from './layout';
 import { normalizeSelection } from './nav';
+import { createDataNote } from './notes';
 import { createRanking, type RankItem } from './ranking';
+import { activeCount, visibleTypes } from './scope';
 
-export type RankMode = 'active' | 'per100k';
+export type RankMode = 'active' | 'last24h';
 
-/** Valore di classifica di uno stato per modalità e filtro tipo (funzione pura). */
-export function stateValue(s: StateSummary, mode: RankMode, type: IncidentType | null): number {
-  if (mode === 'active') return type ? (s.byType[type] ?? 0) : s.active;
-  if (!type) return s.per100k;
-  return s.active > 0 ? s.per100k * ((s.byType[type] ?? 0) / s.active) : 0;
+/** Valore di classifica di un quartiere (funzione pura). */
+export function areaValue(a: AreaSummary, mode: RankMode, type: IncidentType | null, hideProactive: boolean): number {
+  if (mode === 'last24h') return a.last24h;
+  return type ? (a.byType[type] ?? 0) : activeCount(a, hideProactive);
 }
 
-export function rankStates(
-  states: readonly StateSummary[],
+export function rankAreas(
+  areas: readonly AreaSummary[],
   mode: RankMode,
   type: IncidentType | null,
   query: string,
   current?: string,
+  hideProactive = false,
 ): RankItem[] {
   const q = query.trim().toLowerCase();
-  const rows = states
-    .filter((s) => !q || s.name.toLowerCase().includes(q) || s.code.toLowerCase() === q || s.code.toLowerCase().startsWith(q))
-    .map((s) => ({ s, v: stateValue(s, mode, type) }))
-    .sort((a, b) => b.v - a.v || a.s.name.localeCompare(b.s.name, 'it'));
-  const max = Math.max(1e-9, ...rows.map((r) => r.v));
-  return rows.map(({ s, v }) => ({
-    key: s.code,
-    name: s.name,
-    tag: s.code,
-    valueText: mode === 'active' ? fmtInt(v) : fmtDecimal(v),
+  const rows = areas
+    .filter((a) => !q || a.name.toLowerCase().includes(q) || a.id.toLowerCase().includes(q))
+    .map((a) => ({ a, v: areaValue(a, mode, type, hideProactive) }))
+    .sort((x, y) => y.v - x.v || x.a.name.localeCompare(y.a.name, 'it'));
+  const max = Math.max(1, ...rows.map((r) => r.v));
+  return rows.map(({ a, v }) => ({
+    key: a.id,
+    name: a.name,
+    tag: mode === 'active' ? (a.critical ? `${fmtInt(a.critical)} critiche` : '') : `${fmtInt(a.active)} attive`,
+    valueText: fmtInt(v),
     pct: Math.round((v / max) * 100),
-    current: s.code === current,
-    critical: s.critical,
+    current: a.id === current,
+    critical: a.critical,
   }));
 }
 
 export function createSidebar(root: HTMLElement, ctx: Ctx, layout: Layout): Part {
   const { store } = ctx;
+  const prevLabel = root.getAttribute('aria-label');
+  root.setAttribute('aria-label', 'Aggregati e classifica dei quartieri di San Francisco');
   let typeFilter: IncidentType | null = null;
   let mode: RankMode = 'active';
   let query = '';
@@ -52,17 +55,22 @@ export function createSidebar(root: HTMLElement, ctx: Ctx, layout: Layout): Part
     typeFilter = t;
     render();
   });
-  const area = createStackedArea('Incidenti negli ultimi 60 minuti');
+  const area = createStackedArea('Chiamate per ora, ultime 24 ore');
   const filterNote = h('p', { class: 'note' });
+  const modeNote = h('p', { class: 'note' });
 
-  const rank = createRanking((code) => ctx.navigate({ state: code }), 'Classifica degli stati');
-  const empty = h('p', { class: 'empty', text: 'Nessuno stato trovato.' });
+  const rank = createRanking((id) => ctx.navigate({ areaId: id }), 'Classifica dei quartieri');
+  const empty = h('p', { class: 'empty', text: 'Nessun quartiere trovato.' });
   const rankCount = h('span', { class: 'sec__meta' });
 
-  const modeBtns = (['active', 'per100k'] as const).map((m) =>
+  const MODES: Array<[RankMode, string]> = [
+    ['active', 'Attive'],
+    ['last24h', 'Ultime 24 h'],
+  ];
+  const modeBtns = MODES.map(([m, label]) =>
     h('button', {
       class: 'seg__btn',
-      text: m === 'active' ? 'Attivi' : 'Ogni 100k ab.',
+      text: label,
       attrs: { type: 'button', 'aria-pressed': m === mode ? 'true' : 'false' },
       on: {
         click: () => {
@@ -72,9 +80,11 @@ export function createSidebar(root: HTMLElement, ctx: Ctx, layout: Layout): Part
       },
     }),
   );
+  const searchId = `q-${Math.random().toString(36).slice(2, 8)}`;
   const search = h('input', {
     class: 'input',
-    attrs: { type: 'search', placeholder: 'Cerca stato…', 'aria-label': 'Cerca stato', autocomplete: 'off', spellcheck: 'false' },
+    id: searchId,
+    attrs: { type: 'search', placeholder: 'Cerca quartiere…', 'aria-label': 'Cerca quartiere', autocomplete: 'off', spellcheck: 'false' },
     on: {
       input: () => {
         query = search.value;
@@ -90,13 +100,17 @@ export function createSidebar(root: HTMLElement, ctx: Ctx, layout: Layout): Part
     return h('section', { class: 'sec', attrs: { 'aria-labelledby': id } }, head, ...body);
   };
   const rankSec = section(
-    'Classifica stati',
+    'Quartieri',
     h('div', { class: 'seg', attrs: { role: 'group', 'aria-label': 'Criterio di classifica' } }, ...modeBtns),
     search,
+    modeNote,
     rank.el,
     empty,
   );
   rankSec.querySelector('.sec__title')?.after(rankCount);
+  const note = createDataNote('side__note');
+  const noteSec = section('Informazioni sui dati', note.el);
+  noteSec.classList.add('sec--note');
 
   const wrap = h(
     'div',
@@ -104,12 +118,13 @@ export function createSidebar(root: HTMLElement, ctx: Ctx, layout: Layout): Part
     h(
       'div',
       { class: 'side__close' },
-      h('span', { text: 'Aggregati nazionali' }),
+      h('span', { text: 'Aggregati di San Francisco' }),
       h('button', { class: 'btn', text: 'Chiudi', attrs: { type: 'button' }, on: { click: () => layout.toggleSidebar(false) } }),
     ),
-    section('Per tipologia', bars.el, filterNote),
-    section('Ultimi 60 minuti', area.el),
+    section('Attive per categoria', bars.el, filterNote),
+    section('Ultime 24 ore', area.el),
     rankSec,
+    noteSec,
     skeleton,
   );
   root.replaceChildren(wrap);
@@ -117,30 +132,43 @@ export function createSidebar(root: HTMLElement, ctx: Ctx, layout: Layout): Part
   function render(): void {
     const s = store.summary;
     toggleClass(wrap, 'is-loading', !s);
-    skeleton.style.display = s ? 'none' : '';
-    modeBtns.forEach((b, i) => b.setAttribute('aria-pressed', (i === 0 ? mode === 'active' : mode === 'per100k') ? 'true' : 'false'));
+    skeleton.hidden = !!s;
+    modeBtns.forEach((b, i) => b.setAttribute('aria-pressed', MODES[i]?.[0] === mode ? 'true' : 'false'));
     if (!s) return;
-    bars.update(s.byType, typeFilter);
+    const hide = ctx.hideProactive();
+    const types = visibleTypes(hide);
+    if (typeFilter === 'proactive' && hide) typeFilter = null;
+    bars.update(s.byType, typeFilter, hide ? ['proactive'] : []);
     setText(filterNote, typeFilter ? `Filtro locale: ${TYPE_META[typeFilter].label} (tocca di nuovo per rimuovere)` : '');
-    filterNote.style.display = typeFilter ? '' : 'none';
-    area.update(s.timeline, typeFilter);
-    const cur = normalizeSelection(store.selection, store.incidents).state;
-    const items = rankStates(s.byState, mode, typeFilter, query, cur);
+    filterNote.hidden = !typeFilter;
+    area.update(s.timeline, typeFilter ? [typeFilter] : types);
+    const cur = normalizeSelection(store.selection, ctx.lookupIncident).areaId;
+    const items = rankAreas(s.byArea, mode, mode === 'active' ? typeFilter : null, query, cur, hide);
     rank.update(items);
-    empty.style.display = items.length ? 'none' : '';
-    setText(rankCount, `${items.length}/${s.byState.length}`);
+    empty.hidden = items.length > 0;
+    setText(rankCount, `${items.length}/${s.byArea.length}`);
+    const notes: string[] = [];
+    if (mode === 'last24h' && typeFilter) notes.push('Il filtro categoria non è disponibile per le ultime 24 h.');
+    if (mode === 'last24h' && hide) notes.push('Le ultime 24 h comprendono anche l’attività di polizia.');
+    setText(modeNote, notes.join(' '));
+    modeNote.hidden = notes.length === 0;
+    note.update(s);
   }
 
   const throttled = rafThrottle(render);
   const unsub = store.subscribe((e) => {
     if (e.kind === 'summary' || e.kind === 'snapshot' || e.kind === 'selection') throttled.run();
   });
+  const unPrefs = ctx.onPrefs(throttled.run);
   render();
 
   return {
     destroy() {
       unsub();
+      unPrefs();
       throttled.cancel();
+      if (prevLabel === null) root.removeAttribute('aria-label');
+      else root.setAttribute('aria-label', prevLabel);
       root.replaceChildren();
     },
   };

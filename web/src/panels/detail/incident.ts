@@ -1,34 +1,53 @@
-import { PRIORITY_LABEL, TYPE_META, type Incident, type IncidentStatus } from '@live911/shared';
+import { PRIORITY_LABEL, TYPE_META, type Incident } from '@live911/shared';
 import { ApiError } from '../api';
 import type { Ctx } from '../ctx';
 import { h, setAttr, setText, toggleClass } from '../dom';
-import { STATUS_LABEL, fmtElapsed, fmtInt, fmtTime } from '../format';
+import { STATUS_LABEL, fmtDuration, fmtElapsed, fmtTime, fmtTimeTz } from '../format';
 import type { View } from './common';
 
-const STEPS: IncidentStatus[] = ['dispatched', 'on_scene', 'resolved'];
+export type StepKey = 'received' | 'dispatched' | 'on_scene' | 'resolved';
+const STEPS: Array<{ key: StepKey; label: string }> = [
+  { key: 'received', label: 'Ricevuta' },
+  { key: 'dispatched', label: 'Inviata' },
+  { key: 'on_scene', label: 'Sul posto' },
+  { key: 'resolved', label: 'Risolta' },
+];
 
 export interface StepInfo {
-  status: IncidentStatus;
+  key: StepKey;
+  label: string;
   state: 'done' | 'current' | 'todo';
   time: string | null;
 }
 
-/** Stato degli step della timeline dispatched → on_scene → resolved (funzione pura). */
+/** Stato degli step ricevuta → invio → sul posto → risolta (funzione pura). */
 export function stepInfo(inc: Incident): StepInfo[] {
-  const idx = STEPS.indexOf(inc.status);
-  return STEPS.map((status, i) => {
-    let time: string | null = null;
-    if (status === 'dispatched') time = inc.createdAt;
-    else if (status === 'on_scene' && inc.status === 'on_scene') time = inc.updatedAt;
-    else if (status === 'resolved') time = inc.resolvedAt ?? null;
-    // risolto saltando lo step "sul posto": lo consideriamo comunque completato
-    return { status, state: i < idx ? 'done' : i === idx ? (status === 'resolved' ? 'done' : 'current') : 'todo', time };
+  const times: Record<StepKey, string | null> = {
+    received: inc.createdAt,
+    dispatched: inc.dispatchedAt ?? null,
+    on_scene: inc.onSceneAt ?? null,
+    resolved: inc.resolvedAt ?? null,
+  };
+  let lastDone = -1;
+  STEPS.forEach((s, i) => {
+    if (times[s.key]) lastDone = i;
   });
+  const resolved = inc.status === 'resolved';
+  return STEPS.map((s, i) => ({
+    key: s.key,
+    label: s.label,
+    time: times[s.key],
+    state: times[s.key] ? (i === lastDone && !resolved ? 'current' : 'done') : 'todo',
+  }));
 }
 
 export function elapsedMs(inc: Incident, now = Date.now()): number {
   const end = inc.resolvedAt ? Date.parse(inc.resolvedAt) : now;
   return end - Date.parse(inc.createdAt);
+}
+
+export function originText(inc: Incident): string {
+  return inc.officerInitiated ? 'Iniziata dall’agente (pattuglia)' : 'Da chiamata 911';
 }
 
 export function createIncidentView(ctx: Ctx, id: string): View {
@@ -37,42 +56,52 @@ export function createIncidentView(ctx: Ctx, id: string): View {
   let missing = false;
   let loading = current === null;
   const ctrl = new AbortController();
+  if (current) ctx.remember(current);
 
+  const message = h('p', { class: 'status__msg', attrs: { role: 'status' } });
   const banner = h('p', { class: 'banner', attrs: { role: 'status' } });
-  const head = h('div', { class: 'inc-head' });
   const typeEl = h('h2', { class: 'detail__title' });
   const chipP = h('span', { class: 'chip' });
   const chipS = h('span', { class: 'chip chip--status' });
-  const steps = h('ol', { class: 'steps', attrs: { 'aria-label': 'Avanzamento intervento' } });
+  const head = h('div', { class: 'inc-head' }, typeEl, h('div', { class: 'inc-head__chips' }, chipP, chipS));
+  const steps = h('ol', { class: 'steps', attrs: { 'aria-label': 'Avanzamento della chiamata (ora di San Francisco)' } });
   const stepEls = STEPS.map((s) => {
     const time = h('span', { class: 'steps__time' });
-    const li = h('li', { class: 'steps__item' }, h('span', { class: 'steps__dot', attrs: { 'aria-hidden': 'true' } }), h('span', { class: 'steps__label', text: STATUS_LABEL[s] }), time);
+    const li = h('li', { class: 'steps__item' }, h('span', { class: 'steps__dot', attrs: { 'aria-hidden': 'true' } }), h('span', { class: 'steps__label', text: s.label }), time);
     steps.append(li);
     return { li, time };
   });
   const facts = h('dl', { class: 'facts' });
-  const fact = (label: string): HTMLElement => {
-    const dd = h('dd', { class: 'facts__v' });
+  const fact = (label: string, node?: HTMLElement): HTMLElement => {
+    const dd = node ?? h('dd', { class: 'facts__v' });
+    if (node) node.classList.add('facts__v');
     facts.append(h('div', { class: 'facts__row' }, h('dt', { class: 'facts__k', text: label }), dd));
     return dd;
   };
-  const fAddr = fact('Indirizzo (isolato)');
+  const linkBtn = (onClick: () => void): HTMLButtonElement => h('button', { class: 'linkbtn', attrs: { type: 'button' }, on: { click: onClick } });
+  const ixBtn = linkBtn(() => current && ctx.navigate({ areaId: current.areaId, intersectionId: current.intersectionId }));
+  const areaBtn = linkBtn(() => current && ctx.navigate({ areaId: current.areaId }));
   const fDesc = fact('Descrizione');
-  const fUnits = fact('Unità assegnate');
-  const fOpen = fact('Aperto alle');
+  fact('Incrocio', h('dd', {}, ixBtn));
+  fact('Quartiere', h('dd', {}, areaBtn));
+  const fAgency = fact('Agenzia');
+  const fOrigin = fact('Origine');
+  const fRecv = fact('Ricevuta');
   const fUpd = fact('Ultimo aggiornamento');
+  const fResp = fact('Ricezione → invio');
+  const posNote = h('p', { class: 'note card__note', text: 'Posizione approssimata all’incrocio (già mascherata dalla fonte). Dati con ritardo di ~10-20 min.' });
   const elapsedLabel = h('span', { class: 'elapsed__k' });
   const elapsedVal = h('span', { class: 'elapsed__v' });
   const elapsed = h('div', { class: 'elapsed' }, elapsedLabel, elapsedVal);
-  const status = h('p', { class: 'status__msg' });
-  const card = h('article', { class: 'card' }, banner, head, elapsed, steps, facts);
-  head.append(typeEl, h('div', { class: 'inc-head__chips' }, chipP, chipS));
-  const root = h('div', { class: 'view' }, status, card);
+  const card = h('article', { class: 'card' }, banner, head, elapsed, steps, facts, posNote);
+  const root = h('div', { class: 'view' }, message, card);
 
   function render(): void {
-    status.hidden = !(loading || (missing && !current));
-    if (loading) setText(status, 'Caricamento incidente…');
-    else if (missing && !current) setText(status, 'Incidente non più presente (identificativo sconosciuto o scaduto).');
+    message.hidden = !(loading || (missing && !current));
+    if (loading) setText(message, 'Caricamento della chiamata…');
+    else if (missing && !current) {
+      setText(message, 'Chiamata non trovata: potrebbe essere uscita dalla finestra di 48 ore della fonte, oppure l’identificativo non è valido.');
+    }
     card.hidden = !current;
     if (!current) return;
     const inc = current;
@@ -83,28 +112,26 @@ export function createIncidentView(ctx: Ctx, id: string): View {
     setAttr(chipP, 'class', `chip chip--p${inc.priority}`);
     setText(chipS, STATUS_LABEL[inc.status]);
     const resolved = inc.status === 'resolved';
-    const gone = !store.incidents.has(inc.id);
-    banner.hidden = !(resolved || gone);
-    setText(
-      banner,
-      resolved
-        ? `Intervento risolto alle ${fmtTime(inc.resolvedAt ?? inc.updatedAt)}. Non è più attivo sulla mappa.`
-        : 'Questo incidente non risulta più tra quelli attivi.',
-    );
+    banner.hidden = !resolved;
+    setText(banner, resolved ? `Chiamata risolta alle ${fmtTimeTz(inc.resolvedAt ?? inc.updatedAt)}. Non è più attiva sulla mappa.` : '');
     toggleClass(card, 'is-resolved', resolved);
     stepInfo(inc).forEach((s, i) => {
       const el = stepEls[i];
       if (!el) return;
       setAttr(el.li, 'class', `steps__item steps__item--${s.state}`);
       setAttr(el.li, 'aria-current', s.state === 'current' ? 'step' : null);
-      setText(el.time, s.time ? fmtTime(s.time) : s.state === 'todo' ? 'in attesa' : '–');
+      setText(el.time, s.time ? fmtTime(s.time, true) : s.state === 'todo' ? (resolved ? '–' : 'in attesa') : '–');
     });
-    setText(fAddr, inc.address);
     setText(fDesc, inc.description);
-    setText(fUnits, fmtInt(inc.unitsAssigned));
-    setText(fOpen, fmtTime(inc.createdAt, true));
-    setText(fUpd, fmtTime(inc.resolvedAt ?? inc.updatedAt, true));
-    setText(elapsedLabel, resolved ? 'Durata intervento' : 'Tempo trascorso');
+    setText(ixBtn, inc.address);
+    setText(areaBtn, inc.areaName);
+    setText(fAgency, inc.agency);
+    setText(fOrigin, originText(inc));
+    setText(fRecv, fmtTimeTz(inc.createdAt, true));
+    setText(fUpd, fmtTimeTz(inc.resolvedAt ?? inc.updatedAt, true));
+    const resp = inc.dispatchedAt ? (Date.parse(inc.dispatchedAt) - Date.parse(inc.createdAt)) / 1000 : null;
+    setText(fResp, resp === null ? 'n/d' : inc.officerInitiated ? `${fmtDuration(Math.max(0, resp))} (iniziata dall’agente)` : fmtDuration(Math.max(0, resp)));
+    setText(elapsedLabel, resolved ? 'Durata' : 'Tempo trascorso');
     tick();
   }
 
@@ -115,17 +142,23 @@ export function createIncidentView(ctx: Ctx, id: string): View {
   const unsub = store.subscribe((e) => {
     if (e.kind !== 'incident' || e.incident.id !== id) return;
     current = e.incident; // anche l'evento "resolved" porta lo stato finale
+    ctx.remember(current);
     missing = false;
     loading = false;
     render();
   });
-  const timer = setInterval(tick, 1000);
+  const timer = setInterval(() => {
+    if (current && current.status !== 'resolved') tick();
+  }, 1000);
 
+  // Risolta o fuori dallo store: GET /api/incidents/:id
   if (!current) {
     ctx.api
       .incident(id, ctrl.signal)
       .then((inc) => {
+        if (ctrl.signal.aborted) return;
         current = current ?? inc;
+        ctx.remember(current);
         loading = false;
         render();
       })
@@ -133,8 +166,11 @@ export function createIncidentView(ctx: Ctx, id: string): View {
         if (ctrl.signal.aborted) return;
         loading = false;
         missing = true;
-        if (!(err instanceof ApiError) || err.status !== 404) setText(status, 'Impossibile caricare l’incidente.');
         render();
+        if (!(err instanceof ApiError) || err.status !== 404) {
+          message.hidden = false;
+          setText(message, 'Impossibile caricare la chiamata: server non raggiungibile. Riprova tra poco.');
+        }
       });
   }
   render();
