@@ -1,4 +1,4 @@
-import type { CitySummary, Incident, StateDetail } from '@live911/shared';
+import type { AreaDetail, Incident, IntersectionDetail } from '@live911/shared';
 
 export class ApiError extends Error {
   constructor(
@@ -11,9 +11,8 @@ export class ApiError extends Error {
 }
 
 export interface Api {
-  state(code: string, signal?: AbortSignal): Promise<StateDetail>;
-  city(id: string, signal?: AbortSignal): Promise<CitySummary>;
-  cityIncidents(id: string, signal?: AbortSignal): Promise<Incident[]>;
+  area(id: string, signal?: AbortSignal): Promise<AreaDetail>;
+  intersection(id: string, signal?: AbortSignal): Promise<IntersectionDetail>;
   incident(id: string, signal?: AbortSignal): Promise<Incident>;
 }
 
@@ -54,9 +53,8 @@ export function createApi(fetchFn: FetchFn = (i, o) => fetch(i, o), ttlMs = 4000
 
   const enc = encodeURIComponent;
   return {
-    state: (code, s) => getJson<StateDetail>(`/api/states/${enc(code)}`, s),
-    city: (id, s) => getJson<CitySummary>(`/api/cities/${enc(id)}`, s),
-    cityIncidents: (id, s) => getJson<Incident[]>(`/api/incidents?cityId=${enc(id)}&limit=500`, s),
+    area: (id, s) => getJson<AreaDetail>(`/api/areas/${enc(id)}`, s),
+    intersection: (id, s) => getJson<IntersectionDetail>(`/api/intersections/${enc(id)}`, s),
     // niente cache: lo stato dell'incidente cambia
     incident: (id, s) => getJson<Incident>(`/api/incidents/${enc(id)}`, s, 0),
   };

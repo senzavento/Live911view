@@ -4,20 +4,20 @@ import type { ExpressionSpecification, StyleSpecification } from 'maplibre-gl';
 import type { MapLevel } from './levels';
 
 export const SRC = {
-  states: 'l911-states',
-  cities: 'l911-cities',
+  areas: 'l911-areas',
+  intersections: 'l911-intersections',
   incidents: 'l911-incidents',
   pulses: 'l911-pulses',
   selected: 'l911-selected',
 } as const;
 
 export const LAYER = {
-  stateGlow: 'l911-state-glow',
-  stateCore: 'l911-state-core',
-  stateLabel: 'l911-state-label',
-  cityGlow: 'l911-city-glow',
-  cityCore: 'l911-city-core',
-  cityLabel: 'l911-city-label',
+  areaGlow: 'l911-area-glow',
+  areaCore: 'l911-area-core',
+  areaLabel: 'l911-area-label',
+  xGlow: 'l911-x-glow',
+  xCore: 'l911-x-core',
+  xLabel: 'l911-x-label',
   incGlowOuter: 'l911-inc-glow-outer',
   incGlowMid: 'l911-inc-glow-mid',
   incCritical: 'l911-inc-critical',
@@ -29,8 +29,8 @@ export const LAYER = {
 } as const;
 
 export const LEVEL_LAYERS: Record<MapLevel, string[]> = {
-  state: [LAYER.stateGlow, LAYER.stateCore, LAYER.stateLabel],
-  city: [LAYER.cityGlow, LAYER.cityCore, LAYER.cityLabel],
+  area: [LAYER.areaGlow, LAYER.areaCore, LAYER.areaLabel],
+  intersection: [LAYER.xGlow, LAYER.xCore, LAYER.xLabel],
   incident: [LAYER.incGlowOuter, LAYER.incGlowMid, LAYER.incCritical, LAYER.incCore, LAYER.incHot, LAYER.pulseRing, LAYER.pulseFade],
 };
 
@@ -59,49 +59,49 @@ const prio = (crit: number, high: number, norm: number): ExpressionSpecification
 function incRadius(mult: number): ExpressionSpecification {
   return [
     'interpolate', ['linear'], ['zoom'],
-    6, prio(3.6 * mult, 3 * mult, 2.4 * mult),
-    10, prio(7 * mult, 5.4 * mult, 4.4 * mult),
-    16, prio(12 * mult, 9.6 * mult, 8 * mult),
+    12, prio(4 * mult, 3.2 * mult, 2.6 * mult),
+    15, prio(6.5 * mult, 5 * mult, 4 * mult),
+    18, prio(11 * mult, 8.6 * mult, 7 * mult),
   ] as ExpressionSpecification;
 }
 
 export function addDataLayers(map: maplibregl.Map, empty: GeoJSON.FeatureCollection): void {
   for (const s of Object.values(SRC)) map.addSource(s, { type: 'geojson', data: empty });
 
-  // ---- livello stati
-  map.addLayer({ id: LAYER.stateGlow, type: 'circle', source: SRC.states, paint: {
+  // ---- quartieri
+  map.addLayer({ id: LAYER.areaGlow, type: 'circle', source: SRC.areas, paint: {
     'circle-radius': ['*', ['get', 'r'], 1.9], 'circle-color': ['get', 'c'], 'circle-opacity': 0.28, 'circle-blur': 1 } });
-  map.addLayer({ id: LAYER.stateCore, type: 'circle', source: SRC.states, paint: {
+  map.addLayer({ id: LAYER.areaCore, type: 'circle', source: SRC.areas, paint: {
     'circle-radius': ['get', 'r'], 'circle-color': ['get', 'c'], 'circle-opacity': 0.72,
     'circle-stroke-color': ['case', ['==', ['get', 'sel'], 1], '#ffffff', ['get', 'c2']],
     'circle-stroke-width': ['case', ['==', ['get', 'sel'], 1], 3, 1.5], 'circle-stroke-opacity': 0.95 } });
-  map.addLayer({ id: LAYER.stateLabel, type: 'symbol', source: SRC.states, layout: {
+  map.addLayer({ id: LAYER.areaLabel, type: 'symbol', source: SRC.areas, layout: {
     'icon-image': ['concat', 'lbl:', ['get', 'lbl']], 'icon-allow-overlap': true, 'icon-ignore-placement': true } });
 
-  // ---- livello città
-  map.addLayer({ id: LAYER.cityGlow, type: 'circle', source: SRC.cities, paint: {
+  // ---- incroci
+  map.addLayer({ id: LAYER.xGlow, type: 'circle', source: SRC.intersections, paint: {
     'circle-radius': ['*', ['get', 'r'], 1.8], 'circle-color': ['get', 'c'], 'circle-opacity': 0.3, 'circle-blur': 1 } });
-  map.addLayer({ id: LAYER.cityCore, type: 'circle', source: SRC.cities, paint: {
+  map.addLayer({ id: LAYER.xCore, type: 'circle', source: SRC.intersections, paint: {
     'circle-radius': ['get', 'r'], 'circle-color': ['get', 'c'], 'circle-opacity': 0.75,
     'circle-stroke-color': ['case', ['==', ['get', 'sel'], 1], '#ffffff', ['get', 'c2']],
-    'circle-stroke-width': ['case', ['==', ['get', 'sel'], 1] , 3, 2.5], 'circle-stroke-opacity': 0.95 } });
-  map.addLayer({ id: LAYER.cityLabel, type: 'symbol', source: SRC.cities, layout: {
+    'circle-stroke-width': ['case', ['==', ['get', 'sel'], 1], 3, 2], 'circle-stroke-opacity': 0.95 } });
+  map.addLayer({ id: LAYER.xLabel, type: 'symbol', source: SRC.intersections, layout: {
     'icon-image': ['concat', 'lbl:', ['get', 'lbl']], 'icon-allow-overlap': true, 'icon-ignore-placement': true } });
 
   // ---- singoli incidenti: halo multi-layer sfocato + nucleo + punto caldo
   map.addLayer({ id: LAYER.incGlowOuter, type: 'circle', source: SRC.incidents, paint: {
-    'circle-radius': incRadius(4.2), 'circle-color': typeColor(), 'circle-opacity': 0.34, 'circle-blur': 1 } });
+    'circle-radius': incRadius(4.2), 'circle-color': typeColor(), 'circle-opacity': ['*', 0.34, ['get', 'd']], 'circle-blur': 1 } });
   map.addLayer({ id: LAYER.incGlowMid, type: 'circle', source: SRC.incidents, paint: {
-    'circle-radius': incRadius(2.3), 'circle-color': typeColor(), 'circle-opacity': 0.6, 'circle-blur': 0.9 } });
+    'circle-radius': incRadius(2.3), 'circle-color': typeColor(), 'circle-opacity': ['*', 0.6, ['get', 'd']], 'circle-blur': 0.9 } });
   map.addLayer({ id: LAYER.incCritical, type: 'circle', source: SRC.incidents, filter: ['==', ['get', 'p'], 1], paint: {
     'circle-radius': 12, 'circle-color': 'rgba(0,0,0,0)', 'circle-stroke-color': typeColor(),
     'circle-stroke-width': 1.5, 'circle-stroke-opacity': 0.6, 'circle-blur': 0.15 } });
   map.addLayer({ id: LAYER.incCore, type: 'circle', source: SRC.incidents, paint: {
-    'circle-radius': incRadius(1), 'circle-color': typeColor(), 'circle-opacity': 1,
+    'circle-radius': incRadius(1), 'circle-color': typeColor(), 'circle-opacity': ['*', 1, ['get', 'd']],
     'circle-stroke-color': '#ffffff', 'circle-stroke-opacity': ['case', ['==', ['get', 'st'], 1], 0.9, 0.35],
     'circle-stroke-width': 0.8, 'circle-blur': 0.1 } });
   map.addLayer({ id: LAYER.incHot, type: 'circle', source: SRC.incidents, paint: {
-    'circle-radius': incRadius(0.42), 'circle-color': '#ffffff', 'circle-opacity': 0.85, 'circle-blur': 0.3 } });
+    'circle-radius': incRadius(0.42), 'circle-color': '#ffffff', 'circle-opacity': ['*', 0.85, ['get', 'd']], 'circle-blur': 0.3 } });
 
   // ---- selezione (incidente) e pulse effimeri
   map.addLayer({ id: LAYER.selected, type: 'circle', source: SRC.selected, paint: {

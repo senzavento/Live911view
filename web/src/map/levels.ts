@@ -1,31 +1,31 @@
 import type { Selection } from '../store';
 
-export type MapLevel = 'state' | 'city' | 'incident';
+/** area = bolle per quartiere (vista città), intersection = bolle per incrocio, incident = singole chiamate. */
+export type MapLevel = 'area' | 'intersection' | 'incident';
 
-/** Sotto questa soglia: aggregati per stato. */
-export const STATE_MAX_ZOOM = 4.5;
-/** Da questa soglia in su: singoli incidenti. */
-export const INCIDENT_MIN_ZOOM = 8;
-/** Con una città selezionata i singoli incidenti compaiono già da qui. */
-export const CITY_SELECTED_MIN_ZOOM = 6;
+/** Sotto questa soglia: aggregati per quartiere. */
+export const AREA_MAX_ZOOM = 12.5;
+/** Da questa soglia in su: singole chiamate. */
+export const INCIDENT_MIN_ZOOM = 15;
 
-export const CITY_FOCUS_ZOOM = 10.5;
-export const INCIDENT_FOCUS_ZOOM = 14;
+export const AREA_FOCUS_ZOOM = 13.3;
+export const INTERSECTION_FOCUS_ZOOM = 16;
+export const INCIDENT_FOCUS_ZOOM = 16.5;
 
-/** Livello di aggregazione mostrato in base a zoom e selezione. */
+/** Livello mostrato in base a zoom e selezione (un incrocio selezionato mostra le chiamate già da 12.5). */
 export function levelForZoom(zoom: number, sel: Selection = {}): MapLevel {
   if (zoom >= INCIDENT_MIN_ZOOM) return 'incident';
-  if ((sel.cityId || sel.incidentId) && zoom >= CITY_SELECTED_MIN_ZOOM) return 'incident';
-  if (zoom >= STATE_MAX_ZOOM) return 'city';
-  return 'state';
+  if (zoom >= AREA_MAX_ZOOM) return sel.intersectionId || sel.incidentId ? 'incident' : 'intersection';
+  return 'area';
 }
 
-export type ViewLabel = 'Nazionale' | 'Stato' | 'Città' | 'Incidente';
+export type ViewLabel = 'Città' | 'Quartiere' | 'Incrocio' | 'Chiamata';
 
 /** Etichetta accessibile dell'indicatore di livello. */
 export function describeView(level: MapLevel, sel: Selection = {}): ViewLabel {
-  if (sel.incidentId) return 'Incidente';
-  if (level === 'incident') return sel.cityId ? 'Città' : 'Incidente';
-  if (level === 'city') return 'Stato';
-  return 'Nazionale';
+  if (sel.incidentId) return 'Chiamata';
+  if (sel.intersectionId) return 'Incrocio';
+  if (level === 'incident') return 'Chiamata';
+  if (level === 'intersection') return 'Quartiere';
+  return sel.areaId ? 'Quartiere' : 'Città';
 }

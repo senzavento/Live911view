@@ -2,35 +2,40 @@ import { INCIDENT_TYPES } from '@live911/shared';
 import type { Incident, IncidentType, TypeCounts } from '@live911/shared';
 
 export interface Bucket {
+  /** nome per etichette/tooltip (ultimo visto) */
+  name: string;
   active: number;
   critical: number;
   byType: TypeCounts;
-}
-
-export interface CityBucket extends Bucket {
-  state: string;
-  /** somme coordinate degli incidenti attivi: fallback se il catalogo città manca */
+  /** somme coordinate degli incidenti attivi: la media è la posizione di ripiego */
   sumLat: number;
   sumLng: number;
 }
 
+export interface IntersectionBucket extends Bucket {
+  areaId: string;
+  areaName: string;
+}
+
 export function emptyCounts(): TypeCounts {
-  return { fire: 0, medical: 0, police: 0, traffic: 0, hazmat: 0, rescue: 0 };
+  return { violent: 0, property: 0, traffic: 0, disturbance: 0, welfare: 0, alarm: 0, proactive: 0, other: 0 };
 }
 
-/** Tipo prevalente (a parità vince l'ordine di INCIDENT_TYPES); null se non c'è nulla. */
-export function dominantType(counts: TypeCounts): IncidentType | null {
-  return topTypes(counts)[0] ?? null;
-}
-
-/** Tipi con conteggio > 0, dal più frequente. */
+/** Tipi con conteggio > 0, dal più frequente (a parità: ordine di INCIDENT_TYPES). */
 export function topTypes(counts: TypeCounts): IncidentType[] {
   return INCIDENT_TYPES.filter((t) => counts[t] > 0).sort((a, b) => counts[b] - counts[a]);
 }
 
+/** Tipo prevalente; null se non c'è nulla. */
+export function dominantType(counts: TypeCounts): IncidentType | null {
+  return topTypes(counts)[0] ?? null;
+}
+
 interface Contribution {
-  state: string;
-  cityId: string;
+  areaId: string;
+  areaName: string;
+  intersectionId: string;
+  address: string;
   type: IncidentType;
   critical: boolean;
   lat: number;
@@ -38,22 +43,18 @@ interface Contribution {
 }
 
 /**
- * Aggregazione incrementale per stato e città: ogni evento costa O(1).
- * Tiene la "contribuzione" corrente di ogni incidente per poterla sottrarre
- * quando l'incidente cambia (updated) o termina (resolved).
+ * Aggregazione incrementale per quartiere e incrocio: ogni evento costa O(1).
+ * Tiene la "contribuzione" corrente di ogni chiamata per poterla sottrarre
+ * quando cambia (updated) o termina (resolved). I bucket vuoti vengono eliminati.
  */
 export class Aggregator {
-  readonly states = new Map<string, Bucket>();
-  readonly cities = new Map<string, CityBucket>();
-  readonly dirtyStates = new Set<string>();
-  readonly dirtyCities = new Set<string>();
+  readonly areas = new Map<string, Bucket>();
+  readonly intersections = new Map<string, IntersectionBucket>();
   private readonly contrib = new Map<string, Contribution>();
 
   clear(): void {
-    for (const k of this.states.keys()) this.dirtyStates.add(k);
-    for (const k of this.cities.keys()) this.dirtyCities.add(k);
-    this.states.clear();
-    this.cities.clear();
+    this.areas.clear();
+    this.intersections.clear();
     this.contrib.clear();
   }
 
@@ -70,8 +71,10 @@ export class Aggregator {
     }
     if (op === 'resolved' || i.status === 'resolved') return;
     const c: Contribution = {
-      state: i.state,
-      cityId: i.cityId,
+      areaId: i.areaId,
+      areaName: i.areaName,
+      intersectionId: i.intersectionId,
+      address: i.address,
       type: i.type,
       critical: i.priority === 1,
       lat: i.lat,
@@ -86,26 +89,33 @@ export class Aggregator {
   }
 
   private add(c: Contribution, d: 1 | -1): void {
-    let s = this.states.get(c.state);
-    if (!s) this.states.set(c.state, (s = { active: 0, critical: 0, byType: emptyCounts() }));
-    s.active += d;
-    s.byType[c.type] += d;
-    if (c.critical) s.critical += d;
-    this.dirtyStates.add(c.state);
+    let a = this.areas.get(c.areaId);
+    if (!a) this.areas.set(c.areaId, (a = newBucket(c.areaName)));
+    bump(a, c, d);
+    if (a.active <= 0) this.areas.delete(c.areaId);
 
-    let ci = this.cities.get(c.cityId);
-    if (!ci)
-      this.cities.set(
-        c.cityId,
-        (ci = { state: c.state, active: 0, critical: 0, byType: emptyCounts(), sumLat: 0, sumLng: 0 }),
-      );
-    ci.active += d;
-    ci.byType[c.type] += d;
-    ci.sumLat += c.lat * d;
-    ci.sumLng += c.lng * d;
-    if (c.critical) ci.critical += d;
-    this.dirtyCities.add(c.cityId);
+    let x = this.intersections.get(c.intersectionId);
+    if (!x) this.intersections.set(c.intersectionId, (x = { ...newBucket(c.address), areaId: c.areaId, areaName: c.areaName }));
+    bump(x, c, d);
+    if (x.active <= 0) this.intersections.delete(c.intersectionId);
   }
+}
+
+function newBucket(name: string): Bucket {
+  return { name, active: 0, critical: 0, byType: emptyCounts(), sumLat: 0, sumLng: 0 };
+}
+
+function bump(b: Bucket, c: Contribution, d: 1 | -1): void {
+  b.active += d;
+  b.byType[c.type] += d;
+  if (c.critical) b.critical += d;
+  b.sumLat += c.lat * d;
+  b.sumLng += c.lng * d;
+}
+
+/** Posizione media delle chiamate attive di un bucket. */
+export function bucketCentroid(b: Bucket): { lat: number; lng: number } {
+  return { lat: b.sumLat / b.active, lng: b.sumLng / b.active };
 }
 
 /** Raggio (px) della bolla ∝ sqrt(attivi). */

@@ -1,38 +1,46 @@
 import * as maplibregl from 'maplibre-gl';
 // maplibre-gl 6 does not bundle its worker: Vite must emit it as an asset and hand us the URL.
 import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url';
-import { TYPE_META, PRIORITY_LABEL } from '@live911/shared';
-import type { City, Incident } from '@live911/shared';
+import { PRIORITY_LABEL, SF_BOUNDS, TYPE_META } from '@live911/shared';
+import type { AreaInfo, Incident, IncidentStatus } from '@live911/shared';
 import type { Store, StoreEvent } from '../store';
-import { Aggregator } from './aggregate';
+import { Aggregator, bucketCentroid } from './aggregate';
 import { ensureLabelImage } from './labels';
 import { LevelBadge, ResetControl, injectStyle } from './controls';
-import { cityFeatures, collection, incidentFeature, pulseFeatures, stateFeatures } from './features';
+import { areaFeatures, collection, incidentFeature, intersectionFeatures, pulseFeatures } from './features';
 import type { PointFeature } from './features';
-import { STATE_GEO_BY_CODE, US_BOUNDS } from './geo-data';
-import type { LngLatPoint } from './geo-data';
 import { addBasemap, fetchBasemap } from './basemap';
 import { BG_COLOR, LAYER, SRC, addDataLayers, baseStyle, setLevelVisibility } from './layers';
 import { describeView, levelForZoom } from './levels';
 import type { MapLevel } from './levels';
 import { PulseSet } from './pulses';
 import { targetForSelection } from './selection-sync';
+import type { LngLatPoint } from './selection-sync';
 
 export { levelForZoom, describeView } from './levels';
 export type { MapLevel } from './levels';
 
 export interface MountMapOptions {
-  /** Sorgente del catalogo città (default: GET /api/cities). */
-  loadCities?: () => Promise<City[]>;
+  /** Sorgente del catalogo quartieri (default: GET /api/areas). */
+  loadAreas?: () => Promise<AreaInfo[]>;
 }
 
 const DATA_FLUSH_MS = 150;
 const CRITICAL_PAINT_MS = 70;
+const MIN_ZOOM = 10.5;
+const MAX_ZOOM = 18;
+/** Un po' più largo di SF_BOUNDS: si può spostare la vista, ma non perdersi. */
+const MAX_BOUNDS: [[number, number], [number, number]] = [
+  [SF_BOUNDS[0][0] - 0.1, SF_BOUNDS[0][1] - 0.08],
+  [SF_BOUNDS[1][0] + 0.1, SF_BOUNDS[1][1] + 0.08],
+];
 
-const defaultLoadCities = async (): Promise<City[]> => {
-  const res = await fetch('/api/cities');
-  if (!res.ok) throw new Error(`cities ${res.status}`);
-  return (await res.json()) as City[];
+const STATUS_LABEL: Record<IncidentStatus, string> = { dispatched: 'Inviata', on_scene: 'Sul posto', resolved: 'Chiusa' };
+
+const defaultLoadAreas = async (): Promise<AreaInfo[]> => {
+  const res = await fetch('/api/areas');
+  if (!res.ok) throw new Error(`areas ${res.status}`);
+  return (await res.json()) as AreaInfo[];
 };
 
 type GeoSource = maplibregl.GeoJSONSource;
@@ -52,10 +60,11 @@ export function mountMap(el: HTMLElement, store: Store, opts: MountMapOptions = 
   const map = new maplibregl.Map({
     container: el,
     style: baseStyle(),
-    bounds: US_BOUNDS,
+    bounds: SF_BOUNDS,
     fitBoundsOptions: { padding: 24 },
-    minZoom: 2,
-    maxZoom: 18,
+    minZoom: MIN_ZOOM,
+    maxZoom: MAX_ZOOM,
+    maxBounds: MAX_BOUNDS,
     attributionControl: { compact: true },
     dragRotate: false,
     pitchWithRotate: false,
@@ -69,47 +78,63 @@ export function mountMap(el: HTMLElement, store: Store, opts: MountMapOptions = 
   const agg = new Aggregator();
   const pulses = new PulseSet();
   const incFeatures = new Map<string, PointFeature>();
-  const cities = new Map<string, City>();
-  let level: MapLevel = 'state';
+  const areas = new Map<string, AreaInfo>();
+  let level: MapLevel = 'area';
   let ready = false;
   let destroyed = false;
   let raf = 0;
   let lastFlush = 0;
   let lastCritical = 0;
+  // un flag per livello: si ricostruisce solo ciò che è visibile, il resto resta "sporco"
+  let areaDirty = true;
+  let xDirty = true;
   let incDirty = true;
-  let aggDirty = true;
   let selDirty = true;
+  let skipFly = false;
   let popup: maplibregl.Popup | null = null;
   let popupFor = '';
+  let tip: maplibregl.Popup | null = null;
+  let tipFor = '';
 
-  const cityPos = (id: string): LngLatPoint | undefined => {
-    const c = cities.get(id);
-    if (c) return c;
-    const b = agg.cities.get(id);
-    return b && b.active > 0 ? { lat: b.sumLat / b.active, lng: b.sumLng / b.active } : undefined;
+  const areaPos = (id: string): LngLatPoint | undefined => {
+    const a = areas.get(id);
+    if (a) return a;
+    const b = agg.areas.get(id);
+    return b && b.active > 0 ? bucketCentroid(b) : undefined;
+  };
+  const xPos = (id: string): LngLatPoint | undefined => {
+    const b = agg.intersections.get(id);
+    return b && b.active > 0 ? bucketCentroid(b) : undefined;
   };
   const src = (id: string): GeoSource | undefined => map.getSource(id) as GeoSource | undefined;
+  const markAllDirty = (): void => {
+    areaDirty = xDirty = incDirty = selDirty = true;
+  };
 
   // ---------- rendering throttled (rAF) ----------
   const wake = (): void => {
     if (!raf && !destroyed && !document.hidden) raf = requestAnimationFrame(frame);
   };
 
+  const visibleDirty = (): boolean =>
+    selDirty || (level === 'area' && areaDirty) || (level === 'intersection' && xDirty) || (level === 'incident' && incDirty);
+
   function frame(now: number): void {
     raf = 0;
     if (destroyed || !ready) return;
     let more = false;
 
-    if ((aggDirty || selDirty || incDirty) && now - lastFlush >= DATA_FLUSH_MS) {
-      flushData();
-      lastFlush = now;
-    } else if (aggDirty || selDirty || incDirty) more = true;
+    if (visibleDirty()) {
+      if (now - lastFlush >= DATA_FLUSH_MS) {
+        flushData();
+        lastFlush = now;
+      } else more = true;
+    }
 
     if (level === 'incident' && !reducedMotion) {
       if (pulses.size > 0) {
         src(SRC.pulses)?.setData(collection(pulseFeatures(pulses.frames(now))));
         more = true;
-        if (pulses.size === 0) src(SRC.pulses)?.setData(collection([]));
       }
       if (now - lastCritical >= CRITICAL_PAINT_MS) {
         lastCritical = now;
@@ -127,24 +152,25 @@ export function mountMap(el: HTMLElement, store: Store, opts: MountMapOptions = 
 
   function flushData(): void {
     const sel = store.selection;
-    if (aggDirty || selDirty) {
-      const sf = stateFeatures(agg, sel.state);
-      const cf = cityFeatures(agg, cityPos, sel.cityId);
-      for (const f of sf) ensureLabelImage(map, String(f.properties['lbl']));
-      for (const f of cf) ensureLabelImage(map, String(f.properties['lbl']));
-      src(SRC.states)?.setData(collection(sf));
-      src(SRC.cities)?.setData(collection(cf));
-      aggDirty = false;
-      agg.dirtyStates.clear();
-      agg.dirtyCities.clear();
+    if (level === 'area' && areaDirty) {
+      const f = areaFeatures(agg, areaPos, sel.areaId);
+      for (const x of f) ensureLabelImage(map, String(x.properties['lbl']));
+      src(SRC.areas)?.setData(collection(f));
+      areaDirty = false;
     }
-    if (incDirty && level === 'incident') {
+    if (level === 'intersection' && xDirty) {
+      const f = intersectionFeatures(agg, sel.intersectionId);
+      for (const x of f) ensureLabelImage(map, String(x.properties['lbl']));
+      src(SRC.intersections)?.setData(collection(f));
+      xDirty = false;
+    }
+    if (level === 'incident' && incDirty) {
       src(SRC.incidents)?.setData(collection([...incFeatures.values()]));
       incDirty = false;
     }
     if (selDirty) {
-      const inc = sel.incidentId ? store.incidents.get(sel.incidentId) : undefined;
-      src(SRC.selected)?.setData(collection(inc ? [incidentFeature(inc)] : []));
+      const f = sel.incidentId ? incFeatures.get(sel.incidentId) : undefined;
+      src(SRC.selected)?.setData(collection(f ? [f] : []));
       selDirty = false;
     }
   }
@@ -155,14 +181,16 @@ export function mountMap(el: HTMLElement, store: Store, opts: MountMapOptions = 
     if (next !== level) {
       level = next;
       if (ready) setLevelVisibility(map, level);
-      if (level === 'incident') incDirty = true;
+      hideTip();
       wake();
     }
     const sel = store.selection;
-    const city = sel.cityId ? (cities.get(sel.cityId)?.name ?? sel.cityId) : '';
     const label = describeView(level, sel);
-    const detail = label === 'Incidente' && sel.incidentId ? sel.incidentId : label === 'Città' ? city : sel.state ?? '';
-    badge.set(label, label === 'Nazionale' ? '' : detail);
+    let detail = '';
+    if (label === 'Chiamata' && sel.incidentId) detail = sel.incidentId;
+    else if (sel.intersectionId) detail = agg.intersections.get(sel.intersectionId)?.name ?? sel.intersectionId;
+    else if (sel.areaId) detail = areas.get(sel.areaId)?.name ?? agg.areas.get(sel.areaId)?.name ?? sel.areaId;
+    badge.set(label, detail);
   }
 
   // ---------- store -> mappa ----------
@@ -171,22 +199,22 @@ export function mountMap(el: HTMLElement, store: Store, opts: MountMapOptions = 
       case 'snapshot':
         agg.rebuild(store.incidents.values());
         incFeatures.clear();
-        for (const i of store.incidents.values()) incFeatures.set(i.id, incidentFeature(i));
+        for (const i of store.incidents.values()) if (i.status !== 'resolved') incFeatures.set(i.id, incidentFeature(i));
         pulses.clear();
-        aggDirty = incDirty = selDirty = true;
+        markAllDirty();
         break;
       case 'incident': {
         const i = e.incident;
         agg.apply(e.op, i);
-        aggDirty = true;
-        if (e.op === 'resolved') {
+        areaDirty = xDirty = incDirty = true;
+        if (e.op === 'resolved' || i.status === 'resolved') {
+          spawnPulse('fade', incFeatures.get(i.id), i);
           incFeatures.delete(i.id);
-          spawnPulse('fade', i);
         } else {
-          incFeatures.set(i.id, incidentFeature(i));
-          if (e.op === 'created') spawnPulse('birth', i);
+          const f = incidentFeature(i);
+          incFeatures.set(i.id, f);
+          if (e.op === 'created') spawnPulse('birth', f, i);
         }
-        incDirty = true;
         if (store.selection.incidentId === i.id) {
           selDirty = true;
           syncPopup();
@@ -194,8 +222,7 @@ export function mountMap(el: HTMLElement, store: Store, opts: MountMapOptions = 
         break;
       }
       case 'selection':
-        selDirty = true;
-        aggDirty = true;
+        areaDirty = xDirty = selDirty = true;
         applySelection();
         break;
       default:
@@ -204,17 +231,27 @@ export function mountMap(el: HTMLElement, store: Store, opts: MountMapOptions = 
     wake();
   }
 
-  function spawnPulse(kind: 'birth' | 'fade', i: Incident): void {
-    if (reducedMotion || document.hidden || level !== 'incident') return;
-    pulses.add({ kind, lng: i.lng, lat: i.lat, color: TYPE_META[i.type].color, critical: i.priority === 1, start: performance.now() });
+  function spawnPulse(kind: 'birth' | 'fade', f: PointFeature | undefined, i: Incident): void {
+    if (!f || reducedMotion || document.hidden || level !== 'incident') return;
+    const [lng, lat] = f.geometry.coordinates as [number, number];
+    pulses.add({ kind, lng, lat, color: TYPE_META[i.type].color, critical: i.priority === 1, start: performance.now() });
   }
 
   function applySelection(): void {
-    const target = targetForSelection(store.selection, { cityPosition: cityPos, incident: (id) => store.incidents.get(id) });
-    if (target) {
-      const dur = reducedMotion ? 0 : 1400;
-      if (target.kind === 'bounds') map.fitBounds(target.bounds, { padding: 24, duration: dur });
-      else map.flyTo({ center: target.center, zoom: target.zoom, duration: dur, essential: false });
+    if (skipFly) {
+      skipFly = false;
+    } else {
+      const target = targetForSelection(store.selection, {
+        areaPosition: areaPos,
+        intersectionPosition: xPos,
+        incident: (id) => store.incidents.get(id),
+        currentZoom: map.getZoom(),
+      });
+      if (target) {
+        const dur = reducedMotion ? 0 : 1200;
+        if (target.kind === 'bounds') map.fitBounds(target.bounds, { padding: 24, duration: dur });
+        else map.flyTo({ center: target.center, zoom: target.zoom, duration: dur, essential: false });
+      }
     }
     updateLevel();
     syncPopup();
@@ -222,10 +259,9 @@ export function mountMap(el: HTMLElement, store: Store, opts: MountMapOptions = 
 
   function resetView(): void {
     store.clearSelection();
-    map.fitBounds(US_BOUNDS, { padding: 24, duration: reducedMotion ? 0 : 1000 });
   }
 
-  // ---------- popup incidente ----------
+  // ---------- popup chiamata (solo textContent) ----------
   function syncPopup(): void {
     const id = store.selection.incidentId;
     const inc = id ? store.incidents.get(id) : undefined;
@@ -238,67 +274,103 @@ export function mountMap(el: HTMLElement, store: Store, opts: MountMapOptions = 
     if (popupFor !== inc.id) {
       popupFor = '';
       popup?.remove();
-      const created = new maplibregl.Popup({ className: 'l911-popup', offset: 14, closeButton: true, closeOnClick: false, maxWidth: '260px' });
+      const created = new maplibregl.Popup({ className: 'l911-popup', offset: 14, closeButton: true, closeOnClick: false, maxWidth: '270px' });
       popup = created;
       created.on('close', () => {
         if (popupFor === inc.id && store.selection.incidentId === inc.id) {
-          const { state, cityId } = store.selection;
-          store.select({ state, cityId });
+          const { areaId, intersectionId } = store.selection;
+          skipFly = true;
+          store.select({ areaId, intersectionId });
         }
       });
       created.addTo(map);
       popupFor = inc.id;
     }
+    const meta = TYPE_META[inc.type];
     const box = document.createElement('div');
     const title = document.createElement('b');
-    title.textContent = `${TYPE_META[inc.type].icon} ${TYPE_META[inc.type].label}`;
-    title.style.color = TYPE_META[inc.type].color;
+    title.textContent = `${meta.icon} ${meta.label}`;
+    title.style.color = meta.color;
+    const desc = document.createElement('div');
+    desc.textContent = inc.description;
     const addr = document.createElement('div');
     addr.textContent = inc.address;
-    const meta = document.createElement('span');
-    meta.textContent = `Priorità ${PRIORITY_LABEL[inc.priority]} · ${inc.unitsAssigned} unità`;
-    box.append(title, addr, meta);
-    popup?.setLngLat([inc.lng, inc.lat]).setDOMContent(box);
+    const info = document.createElement('span');
+    info.textContent = `Priorità ${PRIORITY_LABEL[inc.priority]} · ${inc.agency} · ${STATUS_LABEL[inc.status]}`;
+    box.append(title, desc, addr, info);
+    const f = incFeatures.get(inc.id);
+    const pos = (f?.geometry.coordinates as [number, number] | undefined) ?? [inc.lng, inc.lat];
+    popup?.setLngLat(pos).setDOMContent(box);
+  }
+
+  // ---------- tooltip nome (quartiere / incrocio) ----------
+  function hideTip(): void {
+    tipFor = '';
+    tip?.remove();
+    tip = null;
+  }
+  function showTip(lngLat: maplibregl.LngLat, key: string, name: string, sub: string): void {
+    if (tipFor !== key || !tip) {
+      hideTip();
+      tip = new maplibregl.Popup({ className: 'l911-tip', closeButton: false, closeOnClick: false, offset: 12 }).addTo(map);
+      tipFor = key;
+    }
+    const box = document.createElement('div');
+    box.append(document.createTextNode(name));
+    if (sub) {
+      const s = document.createElement('small');
+      s.textContent = sub;
+      box.append(s);
+    }
+    tip.setLngLat(lngLat).setDOMContent(box);
   }
 
   // ---------- interazione ----------
-  const hit = (e: maplibregl.MapMouseEvent, layer: string) => map.queryRenderedFeatures(e.point, { layers: [layer] })[0];
+  const coreLayer = (): string => (level === 'incident' ? LAYER.incGlowMid : level === 'intersection' ? LAYER.xCore : LAYER.areaCore);
+  const hit = (point: maplibregl.PointLike): maplibregl.MapGeoJSONFeature | undefined =>
+    map.queryRenderedFeatures(point, { layers: [coreLayer()] })[0];
+  const str = (v: unknown): string | undefined => (typeof v === 'string' && v ? v : undefined);
+
   const onClick = (e: maplibregl.MapMouseEvent): void => {
     if (!ready) return;
+    const p = hit(e.point)?.properties;
+    if (!p) return;
     if (level === 'incident') {
-      const f = hit(e, LAYER.incGlowMid);
-      const id = f?.properties?.['id'] as string | undefined;
-      const inc = id ? store.incidents.get(id) : undefined;
-      if (inc) store.select({ state: inc.state, cityId: inc.cityId, incidentId: inc.id });
-    } else if (level === 'city') {
-      const f = hit(e, LAYER.cityCore);
-      const cityId = f?.properties?.['cityId'] as string | undefined;
-      const state = f?.properties?.['state'] as string | undefined;
-      if (cityId && state) store.select({ state, cityId });
+      const inc = store.incidents.get(str(p['id']) ?? '');
+      if (inc) store.select({ areaId: inc.areaId, intersectionId: inc.intersectionId, incidentId: inc.id });
+    } else if (level === 'intersection') {
+      const intersectionId = str(p['intersectionId']);
+      const areaId = str(p['areaId']);
+      if (intersectionId && areaId) store.select({ areaId, intersectionId });
     } else {
-      const f = hit(e, LAYER.stateCore);
-      const code = f?.properties?.['code'] as string | undefined;
-      if (code && STATE_GEO_BY_CODE.has(code)) store.select({ state: code });
+      const areaId = str(p['areaId']);
+      if (areaId) store.select({ areaId });
     }
   };
   const onMove = (e: maplibregl.MapMouseEvent): void => {
     if (!ready) return;
-    const layer = level === 'incident' ? LAYER.incGlowMid : level === 'city' ? LAYER.cityCore : LAYER.stateCore;
-    map.getCanvas().style.cursor = map.queryRenderedFeatures(e.point, { layers: [layer] }).length ? 'pointer' : '';
+    const f = hit(e.point);
+    map.getCanvas().style.cursor = f ? 'pointer' : '';
+    const p = f?.properties;
+    if (!p || level === 'incident') return hideTip();
+    if (level === 'area') showTip(e.lngLat, `a:${p['areaId']}`, String(p['name'] ?? ''), `${p['n']} attive`);
+    else showTip(e.lngLat, `x:${p['intersectionId']}`, String(p['name'] ?? ''), `${p['area'] ?? ''} · ${p['n']} attive`);
   };
+  const onLeave = (): void => hideTip();
   const onVisibility = (): void => {
     if (document.hidden) {
       if (raf) cancelAnimationFrame(raf);
       raf = 0;
       pulses.clear();
     } else {
-      aggDirty = incDirty = true;
+      markAllDirty();
       wake();
     }
   };
 
   map.on('click', onClick);
   map.on('mousemove', onMove);
+  map.on('mouseout', onLeave);
   map.on('zoom', updateLevel);
   map.on('error', () => {
     /* tile/risorse non raggiungibili: la mappa resta usabile su sfondo scuro */
@@ -311,28 +383,28 @@ export function mountMap(el: HTMLElement, store: Store, opts: MountMapOptions = 
     if (destroyed) return;
     addDataLayers(map, collection([]));
     void fetchBasemap(basemapAbort.signal).then((cfg) => {
-      if (cfg && !destroyed) addBasemap(map, cfg, LAYER.stateGlow);
+      if (cfg && !destroyed) addBasemap(map, cfg, LAYER.areaGlow);
     });
     ready = true;
     level = levelForZoom(map.getZoom(), store.selection);
     setLevelVisibility(map, level);
     if (store.incidents.size) onStoreEvent({ kind: 'snapshot' });
-    aggDirty = incDirty = selDirty = true;
+    markAllDirty();
     updateLevel();
     wake();
   });
   updateLevel();
 
-  // catalogo città: opzionale, il fallback usa le medie delle coordinate
-  (opts.loadCities ?? defaultLoadCities)()
+  // catalogo quartieri: opzionale, il fallback usa le medie delle coordinate delle chiamate
+  (opts.loadAreas ?? defaultLoadAreas)()
     .then((list) => {
-      if (destroyed) return;
-      for (const c of list) cities.set(c.id, c);
-      aggDirty = true;
+      if (destroyed || !Array.isArray(list)) return;
+      for (const a of list) if (a && typeof a.id === 'string' && Number.isFinite(a.lat) && Number.isFinite(a.lng)) areas.set(a.id, a);
+      areaDirty = true;
       wake();
     })
     .catch(() => {
-      /* città non ancora disponibili: si usano i centroidi derivati dagli incidenti */
+      /* catalogo non disponibile: si usano i centroidi derivati dalle chiamate */
     });
 
   return () => {
@@ -345,9 +417,11 @@ export function mountMap(el: HTMLElement, store: Store, opts: MountMapOptions = 
     reduced?.removeEventListener('change', onReducedChange);
     map.off('click', onClick);
     map.off('mousemove', onMove);
+    map.off('mouseout', onLeave);
     map.off('zoom', updateLevel);
     popupFor = '';
     popup?.remove();
+    hideTip();
     badge.destroy();
     map.remove();
     removeStyle();

@@ -16,6 +16,10 @@ const CSS = `
 .l911-popup .maplibregl-popup-close-button{color:#9fb0c6;font-size:16px}
 .l911-popup b{display:block;font-size:13px;margin-bottom:2px}
 .l911-popup span{color:#9fb0c6}
+.l911-tip{pointer-events:none}
+.l911-tip .maplibregl-popup-content{pointer-events:none;background:rgba(10,15,24,.92);color:#e8eef7;border:1px solid rgba(255,255,255,.16);border-radius:8px;padding:5px 9px;font:600 12px/1.3 system-ui,sans-serif}
+.l911-tip .maplibregl-popup-tip{display:none}
+.l911-tip small{display:block;font-weight:500;color:#9fb0c6}
 .maplibregl-ctrl-attrib{background:rgba(10,15,24,.7)!important;color:#9fb0c6}
 .maplibregl-ctrl-attrib a,.maplibregl-ctrl-attrib-inner{color:#9fb0c6!important}
 `;
@@ -70,8 +74,8 @@ export class ResetControl implements maplibregl.IControl {
     b.type = 'button';
     b.className = 'l911-reset';
     b.textContent = '⌂';
-    b.title = 'Reset vista USA';
-    b.setAttribute('aria-label', 'Reset vista USA');
+    b.title = 'Reset vista San Francisco';
+    b.setAttribute('aria-label', 'Reset vista San Francisco');
     b.addEventListener('click', this.onReset);
     c.appendChild(b);
     this.container = c;
