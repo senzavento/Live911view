@@ -47,6 +47,7 @@ export function createLegend(root: HTMLElement, ctx: Ctx): Part {
     h('div', { class: 'legend__head', attrs: { 'aria-hidden': 'true' } }, h('span'), natHead, scopeHead),
     ul,
   );
+  if (typeof matchMedia === 'function' && matchMedia('(max-width: 899px)').matches) details.open = false;
   root.replaceChildren(details);
 
   function render(): void {

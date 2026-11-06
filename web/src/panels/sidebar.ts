@@ -5,6 +5,7 @@ import { h, rafThrottle, setText, toggleClass } from './dom';
 import { fmtDecimal, fmtInt } from './format';
 import { createTypeBars } from './charts/bars';
 import { createStackedArea } from './charts/stacked-area';
+import type { Layout } from './layout';
 import { normalizeSelection } from './nav';
 import { createRanking, type RankItem } from './ranking';
 
@@ -41,7 +42,7 @@ export function rankStates(
   }));
 }
 
-export function createSidebar(root: HTMLElement, ctx: Ctx): Part {
+export function createSidebar(root: HTMLElement, ctx: Ctx, layout: Layout): Part {
   const { store } = ctx;
   let typeFilter: IncidentType | null = null;
   let mode: RankMode = 'active';
@@ -100,6 +101,12 @@ export function createSidebar(root: HTMLElement, ctx: Ctx): Part {
   const wrap = h(
     'div',
     { class: 'side' },
+    h(
+      'div',
+      { class: 'side__close' },
+      h('span', { text: 'Aggregati nazionali' }),
+      h('button', { class: 'btn', text: 'Chiudi', attrs: { type: 'button' }, on: { click: () => layout.toggleSidebar(false) } }),
+    ),
     section('Per tipologia', bars.el, filterNote),
     section('Ultimi 60 minuti', area.el),
     rankSec,

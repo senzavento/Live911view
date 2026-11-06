@@ -25,7 +25,7 @@ export function mountPanels(roots: PanelRoots, store: Store, opts: MountOptions 
   const layout = createLayout(roots.header);
   const parts = [
     createHeader(roots.header, ctx, layout),
-    createSidebar(roots.sidebar, ctx),
+    createSidebar(roots.sidebar, ctx, layout),
     createDetail(roots.detail, ctx, layout),
     createLegend(roots.legend, ctx),
   ];

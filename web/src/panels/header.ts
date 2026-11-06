@@ -72,11 +72,12 @@ export function createHeader(root: HTMLElement, ctx: Ctx, layout: Layout): Part 
     kpis.resp.el,
   );
 
+  const crumbNav = h('nav', { class: 'crumbs', attrs: { 'aria-label': 'Percorso di navigazione' } }, crumbList);
   const wrap = h(
     'div',
     { class: 'hdr' },
     h('div', { class: 'hdr__brand' }, h('span', { class: 'hdr__logo', text: '911', attrs: { 'aria-hidden': 'true' } }), h('h1', { class: 'hdr__title', text: 'Live 911 View' })),
-    h('nav', { class: 'crumbs', attrs: { 'aria-label': 'Percorso di navigazione' } }, crumbList),
+    crumbNav,
     h('div', { class: 'hdr__status' }, sim, conn, menuBtn),
     kpiList,
     live,
@@ -97,6 +98,7 @@ export function createHeader(root: HTMLElement, ctx: Ctx, layout: Layout): Part 
         : undefined,
     }).map((c, i) => ({ ...c, key: String(i) }));
     crumbs.update(list);
+    crumbNav.scrollLeft = crumbNav.scrollWidth; // su mobile mostra sempre l'ultimo livello
   }
 
   function renderKpis(): void {
