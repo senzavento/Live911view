@@ -1,4 +1,5 @@
 import cors from '@fastify/cors';
+import fastifyStatic from '@fastify/static';
 import Fastify, { type FastifyError, type FastifyInstance, type FastifyServerOptions } from 'fastify';
 import type { Runtime } from './runtime';
 import { parseIncidentQuery } from './validation';
@@ -6,6 +7,8 @@ import { parseIncidentQuery } from './validation';
 export interface AppOptions {
   corsOrigins: string[];
   logger: FastifyServerOptions['logger'];
+  /** Directory of the built web app; when set it is served at `/` (single-port deployment). */
+  staticDir?: string;
 }
 
 export async function buildApp(rt: Runtime, opts: AppOptions): Promise<FastifyInstance> {
@@ -29,6 +32,10 @@ export async function buildApp(rt: Runtime, opts: AppOptions): Promise<FastifyIn
   });
 
   registerRoutes(app, rt);
+  if (opts.staticDir) {
+    // Registered after the API routes; unknown /api/* paths still hit the JSON 404 handler.
+    await app.register(fastifyStatic, { root: opts.staticDir, wildcard: true, index: 'index.html' });
+  }
   return app;
 }
 

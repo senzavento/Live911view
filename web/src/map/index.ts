@@ -1,4 +1,6 @@
-import maplibregl from 'maplibre-gl';
+import * as maplibregl from 'maplibre-gl';
+// maplibre-gl 6 does not bundle its worker: Vite must emit it as an asset and hand us the URL.
+import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url';
 import { TYPE_META, PRIORITY_LABEL } from '@live911/shared';
 import type { City, Incident } from '@live911/shared';
 import type { Store, StoreEvent } from '../store';
@@ -45,6 +47,7 @@ export function mountMap(el: HTMLElement, store: Store, opts: MountMapOptions = 
   };
   reduced?.addEventListener('change', onReducedChange);
 
+  maplibregl.setWorkerUrl(workerUrl);
   const map = new maplibregl.Map({
     container: el,
     style: baseStyle(),

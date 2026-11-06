@@ -1,4 +1,4 @@
-import type maplibregl from 'maplibre-gl';
+import type * as maplibregl from 'maplibre-gl';
 
 /** Sprite del conteggio generati su canvas: nessun server di glyph/font necessario (funziona offline). */
 const RATIO = 2;

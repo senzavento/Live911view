@@ -1,0 +1,36 @@
+[Unit]
+Description=Live 911 View (simulated US 911 dashboard)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Placeholders replaced by deploy/install.sh
+WorkingDirectory=@APP_DIR@
+ExecStart=@NODE@ @APP_DIR@/server/dist/index.mjs
+Environment=NODE_ENV=production
+Environment=PORT=8787
+Environment=STATIC_DIR=@APP_DIR@/web/dist
+# Lower than the default (16) to keep a Raspberry Pi comfortable; override in /etc/live911view.env
+Environment=SIM_RATE=8
+EnvironmentFile=-/etc/live911view.env
+Restart=on-failure
+RestartSec=3
+
+# Hardening: unprivileged ephemeral user, read-only filesystem, no new privileges
+DynamicUser=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryMax=400M
+
+[Install]
+WantedBy=multi-user.target

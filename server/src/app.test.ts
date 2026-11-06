@@ -105,3 +105,22 @@ describe('SSE /api/stream', () => {
     await app.close();
   });
 });
+
+describe('static web app', () => {
+  it('serves the built app at / while /api keeps JSON errors', async () => {
+    const { mkdtempSync, writeFileSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const dir = mkdtempSync(join(tmpdir(), 'live911-static-'));
+    writeFileSync(join(dir, 'index.html'), '<!doctype html><title>ok</title>');
+    const staticApp = await testApp(rt, { staticDir: dir });
+    const home = await staticApp.inject('/');
+    expect(home.statusCode).toBe(200);
+    expect(home.headers['content-type']).toContain('text/html');
+    expect(home.headers['x-content-type-options']).toBe('nosniff');
+    const missing = await staticApp.inject('/api/nothing');
+    expect(missing.statusCode).toBe(404);
+    expect(missing.json()).toHaveProperty('error');
+    await staticApp.close();
+  });
+});

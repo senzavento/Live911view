@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { buildApp } from './app';
 import { loadConfig } from './config';
 import { createRuntime } from './runtime';
@@ -6,9 +7,11 @@ const SHUTDOWN_TIMEOUT_MS = 10_000;
 
 async function main(): Promise<void> {
   const config = loadConfig();
+  const staticDir = config.staticDir;
+  if (staticDir && !existsSync(staticDir)) throw new Error(`STATIC_DIR does not exist: ${staticDir} (run "npm run build")`);
   let onError: (err: unknown) => void = (err) => console.error(err);
   const runtime = createRuntime({ seed: config.simSeed, rate: config.simRate, onError: (e) => onError(e) });
-  const app = await buildApp(runtime, { corsOrigins: config.corsOrigins, logger: { level: config.logLevel } });
+  const app = await buildApp(runtime, { corsOrigins: config.corsOrigins, logger: { level: config.logLevel }, staticDir });
   onError = (err) => app.log.error(err);
 
   runtime.start();

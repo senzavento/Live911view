@@ -19,6 +19,6 @@ export function testRuntime(seed = 42, rate = 16): { rt: Runtime; sim: Simulator
   };
 }
 
-export async function testApp(rt: Runtime) {
-  return buildApp(rt, { corsOrigins: ['http://localhost:5173'], logger: false });
+export async function testApp(rt: Runtime, extra: { staticDir?: string } = {}) {
+  return buildApp(rt, { corsOrigins: ['http://localhost:5173'], logger: false, ...extra });
 }

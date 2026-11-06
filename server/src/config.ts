@@ -5,6 +5,8 @@ export interface Config {
   simSeed: number;
   corsOrigins: string[];
   logLevel: string;
+  /** Built web app to serve, or undefined to run API-only. */
+  staticDir: string | undefined;
 }
 
 type Env = Record<string, string | undefined>;
@@ -28,5 +30,6 @@ export function loadConfig(env: Env = process.env): Config {
     simSeed: Math.trunc(number(env, 'SIM_SEED', Date.now() % 2 ** 31, 0, 2 ** 32 - 1)),
     corsOrigins: (env.CORS_ORIGIN || 'http://localhost:5173').split(',').map((s) => s.trim()).filter(Boolean),
     logLevel: env.LOG_LEVEL || 'info',
+    staticDir: env.STATIC_DIR || undefined,
   };
 }

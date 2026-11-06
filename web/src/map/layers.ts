@@ -1,5 +1,5 @@
 import { INCIDENT_TYPES, TYPE_META } from '@live911/shared';
-import type maplibregl from 'maplibre-gl';
+import type * as maplibregl from 'maplibre-gl';
 import type { ExpressionSpecification, StyleSpecification } from 'maplibre-gl';
 import type { MapLevel } from './levels';
 
